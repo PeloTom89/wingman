@@ -77,7 +77,26 @@ dependencies {
     // Verify the current version at https://developer.dji.com/mobile-sdk/downloads
     // before first build — DJI ships frequent point releases and this number will drift.
     val djiSdkVersion = "5.18.0"
-    compileOnly("com.dji:dji-sdk-v5-aircraft-provided:$djiSdkVersion")
+    // "-provided" is NOT Gradle `compileOnly` scope despite the name suggesting it -- it's
+    // where DJI actually puts the real Java/Kotlin classes (SDKManager, KeyManager,
+    // VirtualStickManager, PerceptionManager, etc; confirmed via `javap` against the real
+    // jar). `dji-sdk-v5-aircraft` itself is almost entirely native .so files (a 61MB
+    // libdjisdk_jni.so) with a near-empty classes.jar. Marking "-provided" as `compileOnly`
+    // compiles fine but crashes at runtime with NoClassDefFoundError the moment
+    // SDKManager.getInstance() is touched -- confirmed via a real on-device install.
+    //
+    // Fixing that scope surfaces a SEPARATE, still-open problem: dji.v5.manager.SDKManager
+    // itself fails ART's bytecode verifier at runtime ("Constructor returning without
+    // calling superclass constructor") on Android 16 (API 36) -- confirmed on a real Moto
+    // G Play 2026 device, reproduced identically across AGP 8.1.4/8.6.0 and MSDK 5.17.0/
+    // 5.18.0, so it isn't a local toolchain or version-pin issue. Matches multiple open,
+    // unresolved reports on DJI's own GitHub (dji-sdk/Mobile-SDK-Android issues #1311 and
+    // #1104, dji-sdk/Mobile-SDK-Android-V5 issue #671) describing the same failure on
+    // recent Android versions. This currently blocks the app from launching at all on
+    // Android 16 devices -- see README's "Known blocking issue" section before assuming
+    // any DJI SDK code in this repo runs. Try an older Android device (12-14) if you have
+    // one; that's the next real diagnostic step, not further Gradle config changes.
+    implementation("com.dji:dji-sdk-v5-aircraft-provided:$djiSdkVersion")
     implementation("com.dji:dji-sdk-v5-aircraft:$djiSdkVersion")
     runtimeOnly("com.dji:dji-sdk-v5-networkImp:$djiSdkVersion")
 
