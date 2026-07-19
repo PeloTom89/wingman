@@ -1,0 +1,7 @@
+# Copy this file to local.properties (gitignored) and fill in real values.
+# local.properties is also where Android Studio writes sdk.dir automatically.
+
+# From developer.dji.com -> your app entry. Must correspond to an app registered
+# with applicationId "com.pelotom89.wingman" (see app/build.gradle.kts) exactly,
+# or SDKManager registration will fail at runtime.
+DJI_API_KEY=
