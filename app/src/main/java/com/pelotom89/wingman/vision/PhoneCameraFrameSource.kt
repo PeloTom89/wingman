@@ -2,6 +2,7 @@ package com.pelotom89.wingman.vision
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -89,6 +90,18 @@ class PhoneCameraFrameSource(private val context: Context) {
  * this interleaves them into NV21 before reusing the same [nv21ToBitmapOrNull] path as
  * sdk/VideoFeedRepository. Stride-aware (doesn't assume pixelStride == 1 on the chroma
  * planes, which isn't true on all devices).
+ *
+ * CRITICAL: also rotates (via [ImageProxy.imageInfo]'s `rotationDegrees`) and horizontally
+ * mirrors the result to match what [PreviewView] actually displays. ImageAnalysis buffers
+ * come back in the sensor's raw orientation — `PreviewView` applies the needed rotation/
+ * mirroring internally for on-screen display, but that transform is invisible to this
+ * separate analysis stream, so without reapplying it here the tracker/tap-to-select
+ * coordinates silently drift out of sync with the visible feed as the phone is
+ * tilted/rotated (confirmed on-device: tilting the phone left/right visibly detached the
+ * tracked box from the actual face). Front camera specifically needs the mirror to match
+ * PreviewView's "selfie" mirroring — [CameraSelector.DEFAULT_FRONT_CAMERA] is hardcoded
+ * above, so the mirror is unconditional here; revisit together if the camera selector ever
+ * becomes configurable.
  */
 private fun ImageProxy.toBitmapOrNull(): Bitmap? {
     if (planes.size < 3) return null
@@ -115,7 +128,23 @@ private fun ImageProxy.toBitmapOrNull(): Bitmap? {
         }
     }
 
-    return nv21ToBitmapOrNull(nv21, width, height)
+    val raw = nv21ToBitmapOrNull(nv21, width, height) ?: return null
+    return raw.rotatedAndMirroredToMatchPreview(imageInfo.rotationDegrees)
+}
+
+private fun Bitmap.rotatedAndMirroredToMatchPreview(rotationDegrees: Int): Bitmap {
+    // Two explicit steps rather than one combined Matrix: rotation can swap width/height,
+    // and getting the mirror's pivot right pre- vs post-rotation is easy to get backwards.
+    // Doing it in two Bitmap.createBitmap calls lets each step use the CURRENT bitmap's own
+    // (already-correct) dimensions rather than hand-computing rotated bounds.
+    val rotated = if (rotationDegrees == 0) {
+        this
+    } else {
+        val rotateMatrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+        Bitmap.createBitmap(this, 0, 0, width, height, rotateMatrix, true)
+    }
+    val mirrorMatrix = Matrix().apply { postScale(-1f, 1f, rotated.width / 2f, rotated.height / 2f) }
+    return Bitmap.createBitmap(rotated, 0, 0, rotated.width, rotated.height, mirrorMatrix, true)
 }
 
 private fun ByteBuffer.copyRow(dest: ByteArray, destOffset: Int, sourceOffset: Int, length: Int) {
