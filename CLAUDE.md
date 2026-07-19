@@ -14,9 +14,9 @@ dependency on them** and shouldn't grow one — different language/runtime entir
 ## Build/run
 
 The Gradle wrapper is committed and works (`./gradlew assembleDebug` / `./gradlew test`
-have both been run against the real MSDK V5 5.18.0 + MediaPipe 0.10.14 jars and pass — see
-README.md's "Build status"). `local.properties` is gitignored; you need your own
-`sdk.dir` and `DJI_API_KEY` (see README.md's Setup section) to build.
+have both been run against the real MSDK V5 5.18.0 jar and pass — see README.md's "Build
+status"). `local.properties` is gitignored; you need your own `sdk.dir` and `DJI_API_KEY`
+(see README.md's Setup section) to build.
 
 Real device only for anything DJI-related — MSDK V5 does not run in the emulator (needs a
 USB accessory connection and an aircraft radio link via the RC-N2). A clean compile proves
@@ -43,30 +43,26 @@ builds cannot be run under a Java debugger** (`isDebuggable = false` is required
   that's a sign the architecture is being routed around rather than through — reconsider
   before adding one.
 
-## Known state: compiles and passes tests against the real SDK, unverified against real hardware
+## Known state: GPS-only rewrite compiles and passes tests, unflown
 
-Every DJI/MediaPipe API call in this codebase has been checked against the actual jars
-(via `javap` against the cached Gradle dependencies, not just docs/search results) and the
-full app compiles, assembles, and passes its unit tests. That's a much stronger bar than
-"written from documentation" — but it's still not the same as flying it. Two things remain
-genuinely unverified because they can't be checked from bytecode alone: perception data
-units and ring-indexing convention (`sdk/PerceptionRepository.kt`'s header comment) — both
-feed `ObstacleSafetyClamp` directly, so confirm them against real sensor output before
-trusting that file's thresholds in flight.
+This app pivoted from vision+GPS tracking to **GPS-only following** — `vision/` (detector,
+tracker, phone-camera test harness) was deleted outright, not kept disconnected. The
+subject is always the controller phone's own GPS position; the aircraft holds a standoff
+distance and points the gimbal at the subject's ground-level position (altitude +
+horizontal distance only — the subject, a cyclist, is assumed always at ground level, no
+height estimate needed). See README.md's "Why this app exists" section for the full
+rationale.
 
-If you touch any DJI/MediaPipe call and aren't sure of a signature, don't guess from
-search results — extract the real jar from the Gradle cache
-(`~/.gradle/caches/modules-2/files-2.1/com.dji/...` /
-`.../com.google.mediapipe/...`) and run `javap -public -classpath <jar> <class>` the way
-this codebase's signatures were originally verified. It's faster and more reliable than
-another round of web search.
+Every DJI API call in this codebase has been checked against the actual jars (via `javap`
+against the cached Gradle dependencies, not just docs/search results) and the full app
+compiles, assembles, and passes its unit tests. That's a much stronger bar than "written
+from documentation" — but it's still not the same as flying it. **Nothing about GPS-only
+following (the standoff-distance approach/backoff, the gimbal-pitch sign convention, the
+combined behavior at realistic speed) has been verified on real hardware yet** — see
+README.md's "Known gaps" and milestone list.
 
-The vision pipeline (`SubjectDetector`/`SubjectTracker`/`TemplateMatchBoxTracker`) has
-gone further than a compile check: it's been run end-to-end on a real device via
-`ui/VisionTestScreen` (phone's own camera via CameraX, no DJI hardware needed — see
-`vision/PhoneCameraFrameSource.kt`), tap-to-select through sustained tracking, 35+ seconds
-with zero crashes. Note MediaPipe runs on **CPU delegate, not GPU** — GPU crashed
-intermittently on-device; see `SubjectDetector.kt`'s header comment before switching it
-back. See README.md's "Known gaps" section for what's still open (`GimbalController`
-unwired, perception units/ring-indexing unverified, DJI camera path itself untested
-pending a connected aircraft).
+If you touch any DJI call and aren't sure of a signature, don't guess from search
+results — extract the real jar from the Gradle cache
+(`~/.gradle/caches/modules-2/files-2.1/com.dji/...`) and run
+`javap -public -classpath <jar> <class>` the way this codebase's signatures were
+originally verified. It's faster and more reliable than another round of web search.

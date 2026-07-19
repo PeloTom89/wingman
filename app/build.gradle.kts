@@ -79,9 +79,9 @@ android {
     }
 
     packaging {
-        // DJI's aircraft/networkImp artifacts and several native-heavy transitive deps
-        // (video codec, OpenCV/TFLite if added) commonly collide on these; verify the
-        // exact conflicting paths against the actual build error and extend as needed.
+        // DJI's aircraft/networkImp artifacts and their native-heavy transitive deps
+        // (video codec libs) commonly collide on these; verify the exact conflicting
+        // paths against the actual build error and extend as needed.
         resources.excludes += setOf(
             "META-INF/DEPENDENCIES",
             "META-INF/LICENSE",
@@ -154,28 +154,6 @@ dependencies {
 
     // --- Location (subject GPS proxy, see location/SubjectLocationProvider.kt) ---
     implementation("com.google.android.gms:play-services-location:21.3.0")
-
-    // --- On-device vision tracking ---
-    // MediaPipe Tasks Vision provides the mobile-optimized, GPU-delegated object detector
-    // used at reduced cadence in vision/SubjectDetector.kt (see plan: detect-then-track,
-    // not full per-frame detection, to avoid contending with live video decode).
-    implementation("com.google.mediapipe:tasks-vision:0.10.14")
-
-    // --- CameraX (phone-camera test source only, see vision/PhoneCameraFrameSource.kt) ---
-    // Used exclusively by the standalone VisionTestScreen so the detect/track pipeline is
-    // exercisable without a DJI aircraft connected -- NOT part of the real flight path,
-    // which reads frames from sdk/VideoFeedRepository (the DJI aircraft camera stream)
-    // instead.
-    // Pinned to 1.3.4, not the current latest (1.6.x) -- newer CameraX releases require
-    // AGP 8.9.1+ and compileSdk 36, which we're deliberately not bumping to avoid
-    // destabilizing the carefully-verified DJI SDK toolchain (AGP 8.6.0 / compileSdk 34,
-    // see README's "Resolved: launch crash on Android 16"). Revisit if compileSdk needs
-    // to move for another reason anyway.
-    val cameraXVersion = "1.3.4"
-    implementation("androidx.camera:camera-core:$cameraXVersion")
-    implementation("androidx.camera:camera-camera2:$cameraXVersion")
-    implementation("androidx.camera:camera-lifecycle:$cameraXVersion")
-    implementation("androidx.camera:camera-view:$cameraXVersion")
 
     // --- Testing ---
     testImplementation("junit:junit:4.13.2")

@@ -4,7 +4,6 @@ import com.pelotom89.wingman.location.LocationFix
 import com.pelotom89.wingman.sdk.AircraftTelemetry
 import com.pelotom89.wingman.sdk.ObstacleSnapshot
 import com.pelotom89.wingman.sdk.VirtualStickCommand
-import com.pelotom89.wingman.vision.TrackingResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,16 +13,21 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
- * The single place flight-control POLICY lives, per the plan — vision/, sdk/telemetry,
- * and location/ are deliberately dumb data sources that know nothing about tracking
- * state or safety, so this is the only class that decides what the aircraft should do
- * next and why. Every command this emits has already passed through [SafetyLimits] and
+ * The single place flight-control POLICY lives — sdk/telemetry and location/ are
+ * deliberately dumb data sources that know nothing about tracking state or safety, so this
+ * is the only class that decides what the aircraft (and gimbal) should do next and why.
+ * Every VirtualStick command this emits has already passed through [SafetyLimits] and
  * [ObstacleSafetyClamp] before [commandFlow] reaches VirtualStickController — nothing
  * downstream re-checks safety, so nothing upstream of this class should ever be trusted
  * to skip it.
+ *
+ * GPS-only: vision-based tracking (SubjectTracker et al.) was removed after real-world
+ * testing raised doubts about detecting a small, fast, distant subject reliably — see
+ * README. The subject's position is always the controller phone's own GPS fix (it stays
+ * with the cyclist), and [FlightCommandCalculator.computeFollowCommand] holds a standoff
+ * distance rather than closing the gap to zero.
  */
 class FlightStateMachine(
-    private val trackingResultFlow: Flow<TrackingResult>,
     private val telemetryFlow: Flow<AircraftTelemetry>,
     private val obstacleSnapshotFlow: Flow<ObstacleSnapshot>,
     private val locationFixFlow: Flow<LocationFix?>,
@@ -31,7 +35,6 @@ class FlightStateMachine(
     private val safetyLimits: SafetyLimits = SafetyLimits(),
     private val obstacleSafetyClamp: ObstacleSafetyClamp = ObstacleSafetyClamp(),
     private val commandCalculator: FlightCommandCalculator = FlightCommandCalculator(),
-    private val debouncer: TrackingLossDebouncer = TrackingLossDebouncer(),
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val _flightStateFlow = MutableStateFlow<FlightState>(FlightState.Idle)
@@ -40,6 +43,12 @@ class FlightStateMachine(
     private val _commandFlow = MutableStateFlow(VirtualStickCommand.ZERO)
     val commandFlow: StateFlow<VirtualStickCommand> get() = _commandFlow.asStateFlow()
 
+    /** Target gimbal pitch, degrees (0 = level, negative = looking down — see
+     *  computeGimbalPitchDegrees). Independent of commandFlow: WingmanViewModel forwards
+     *  this to GimbalController directly, not through VirtualStickController. */
+    private val _gimbalPitchDegreesFlow = MutableStateFlow(0.0)
+    val gimbalPitchDegreesFlow: StateFlow<Double> get() = _gimbalPitchDegreesFlow.asStateFlow()
+
     private var launchPoint: LatLon? = null
 
     /** Called once, at takeoff — anchors the geofence check in [SafetyLimits]. */
@@ -47,23 +56,22 @@ class FlightStateMachine(
         launchPoint = point
     }
 
-    /** Operator action: begin VisualTrack after a successful tap-to-select seed. */
-    fun startTracking() {
+    /** Operator action: begin GPS following once armed. */
+    fun startFollowing() {
         if (_flightStateFlow.value == FlightState.Idle) {
-            _flightStateFlow.value = FlightState.VisualTrack
+            _flightStateFlow.value = FlightState.Following
         }
     }
 
     fun start(scope: CoroutineScope) {
         scope.launch {
             combine(
-                trackingResultFlow,
                 telemetryFlow,
                 obstacleSnapshotFlow,
                 locationFixFlow,
                 manualOverrideActiveFlow,
-            ) { tracking, telemetry, obstacles, locationFix, overrideActive ->
-                Tick(tracking, telemetry, obstacles, locationFix, overrideActive)
+            ) { telemetry, obstacles, locationFix, overrideActive ->
+                Tick(telemetry, obstacles, locationFix, overrideActive)
             }.collect { tick -> process(tick) }
         }
     }
@@ -75,9 +83,8 @@ class FlightStateMachine(
             return
         }
 
-        // Safety escalations take priority over whatever tracking/state logic would
-        // otherwise decide — per the plan: "Any state -> ReturnToHome: battery threshold
-        // breach or geofence breach."
+        // Safety escalations take priority over whatever following logic would otherwise
+        // decide — any state -> ReturnToHome on battery threshold or geofence breach.
         val batteryStatus = safetyLimits.batteryStatus(tick.telemetry.batteryPercent)
         val launch = launchPoint
         val geofenceBreached = launch != null &&
@@ -98,43 +105,39 @@ class FlightStateMachine(
             _flightStateFlow.value = escalatedState
             // RTH/EmergencyStop are intentionally NOT driven via VirtualStick: zero the
             // stick output here and trigger the aircraft's own native go-home/land
-            // behavior out-of-band (not yet implemented — see README's open items;
-            // FlightController's native startGoHome()/startLanding() are the intended
-            // calls, deliberately independent of the VirtualStick path this class owns).
+            // behavior out-of-band (see sdk/FlightSafetyActionsController.kt, wired from
+            // WingmanViewModel on state-class transition, deliberately independent of the
+            // VirtualStick path this class owns).
             _commandFlow.value = VirtualStickCommand.ZERO
             return
         }
 
         val currentState = _flightStateFlow.value
-        if (currentState !is FlightState.VisualTrack && currentState !is FlightState.GpsGuided) {
+        if (currentState !is FlightState.Following) {
             // Idle, or recovering from a prior ReturnToHome/EmergencyStop: hold position,
-            // wait for an explicit operator action (startTracking()) rather than guessing.
+            // wait for an explicit operator action (startFollowing()) rather than guessing.
             _commandFlow.value = VirtualStickCommand.ZERO
             return
         }
 
-        val nextState = debouncer.onTick(tick.tracking, currentState) ?: currentState
-        _flightStateFlow.value = nextState
-
-        val proposedCommand = when (nextState) {
-            is FlightState.VisualTrack -> {
-                val box = (tick.tracking as? TrackingResult.Tracking)?.box
-                    ?: (tick.tracking as? TrackingResult.Lost)?.lastKnownBox
-                box?.let { commandCalculator.computeVisualTrackCommand(it) } ?: VirtualStickCommand.ZERO
-            }
-            is FlightState.GpsGuided -> {
-                val fix = tick.locationFix
-                if (fix == null || fix.isStale(nowMillis())) {
-                    VirtualStickCommand.ZERO // no trustworthy subject position — hold, don't guess
-                } else {
-                    commandCalculator.computeGpsGuidedCommand(
-                        aircraft = LatLon(tick.telemetry.latitude, tick.telemetry.longitude),
-                        aircraftHeadingDegrees = tick.telemetry.headingDegrees,
-                        subject = fix.position,
-                    )
-                }
-            }
-            else -> VirtualStickCommand.ZERO
+        val fix = tick.locationFix
+        val proposedCommand: VirtualStickCommand
+        if (fix == null || fix.isStale(nowMillis())) {
+            // No trustworthy subject position — hold, don't guess. Gimbal also holds its
+            // last target rather than snapping to level, since a stale fix is more likely
+            // a brief GPS hiccup than the subject actually vanishing.
+            proposedCommand = VirtualStickCommand.ZERO
+        } else {
+            val aircraft = LatLon(tick.telemetry.latitude, tick.telemetry.longitude)
+            proposedCommand = commandCalculator.computeFollowCommand(
+                aircraft = aircraft,
+                aircraftHeadingDegrees = tick.telemetry.headingDegrees,
+                subject = fix.position,
+            )
+            _gimbalPitchDegreesFlow.value = computeGimbalPitchDegrees(
+                altitudeAglMeters = tick.telemetry.altitudeMeters,
+                horizontalDistanceMeters = haversineMeters(aircraft, fix.position),
+            )
         }
 
         val speedLimited = safetyLimits.clampSpeed(proposedCommand)
@@ -148,7 +151,6 @@ class FlightStateMachine(
     }
 
     private data class Tick(
-        val tracking: TrackingResult,
         val telemetry: AircraftTelemetry,
         val obstacles: ObstacleSnapshot,
         val locationFix: LocationFix?,

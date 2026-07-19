@@ -21,8 +21,8 @@ import kotlinx.coroutines.flow.callbackFlow
  * RC-to-aircraft radio link that VirtualStick commands travel over — no networking layer
  * needed (see the plan's "no separate GPS beacon" decision).
  *
- * Exposes staleness explicitly: GpsGuided mode should refuse to trust a fix that's too
- * old rather than silently flying toward a stale coordinate.
+ * Exposes staleness explicitly: Following should refuse to trust a fix that's too old
+ * rather than silently flying toward a stale coordinate.
  */
 class SubjectLocationProvider(context: Context) {
 

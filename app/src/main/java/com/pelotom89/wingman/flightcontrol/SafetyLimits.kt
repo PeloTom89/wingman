@@ -55,8 +55,8 @@ enum class BatteryStatus { OK, RTH_TRIGGER, CRITICAL }
 
 data class LatLon(val latitude: Double, val longitude: Double)
 
-/** Great-circle distance — used both for the geofence check and for GpsGuided's
- *  bearing/distance-to-subject computation in FlightStateMachine. */
+/** Great-circle distance — used both for the geofence check and for Following's
+ *  bearing/distance-to-subject computation in FlightCommandCalculator. */
 fun haversineMeters(a: LatLon, b: LatLon): Double {
     val earthRadiusMeters = 6_371_000.0
     val dLat = Math.toRadians(b.latitude - a.latitude)
@@ -68,7 +68,7 @@ fun haversineMeters(a: LatLon, b: LatLon): Double {
 }
 
 /** Initial bearing from a to b, in degrees, 0=north/360, clockwise — used to compute the
- *  yaw-to-face-subject command in GpsGuided mode. */
+ *  yaw-to-face-subject command while Following. */
 fun bearingDegrees(a: LatLon, b: LatLon): Double {
     val lat1 = Math.toRadians(a.latitude)
     val lat2 = Math.toRadians(b.latitude)

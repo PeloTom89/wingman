@@ -1,7 +1,6 @@
 package com.pelotom89.wingman.ui
 
 import android.app.Application
-import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pelotom89.wingman.core.FlightLogger
@@ -12,50 +11,35 @@ import com.pelotom89.wingman.flightcontrol.ManualOverrideGate
 import com.pelotom89.wingman.location.SubjectLocationProvider
 import com.pelotom89.wingman.sdk.AircraftConnectionRepository
 import com.pelotom89.wingman.sdk.FlightSafetyActionsController
+import com.pelotom89.wingman.sdk.GimbalController
 import com.pelotom89.wingman.sdk.PerceptionRepository
 import com.pelotom89.wingman.sdk.SdkRegistrationState
-import com.pelotom89.wingman.sdk.VideoFeedRepository
 import com.pelotom89.wingman.sdk.VirtualStickController
 import com.pelotom89.wingman.sdk.WingmanApplication
-import com.pelotom89.wingman.sdk.toBitmapOrNull
-import com.pelotom89.wingman.vision.SubjectDetector
-import com.pelotom89.wingman.vision.SubjectTracker
-import com.pelotom89.wingman.vision.TapToSelectHandler
-import com.pelotom89.wingman.vision.TemplateMatchBoxTracker
-import com.pelotom89.wingman.vision.TrackingResult
-import dji.sdk.keyvalue.value.common.ComponentIndexType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * Composition root wiring sdk/ + vision/ + location/ + flightcontrol/ together, and the
- * single object the UI layer observes. Kept intentionally thin: every actual decision
- * (what command to send, when to switch modes) lives in FlightStateMachine, not here —
- * this class only assembles the dependency graph and exposes it as Compose-friendly state.
+ * Composition root wiring sdk/ + location/ + flightcontrol/ together, and the single
+ * object the UI layer observes. Kept intentionally thin: every actual decision (what
+ * command to send, when to switch modes) lives in FlightStateMachine, not here — this
+ * class only assembles the dependency graph and exposes it as Compose-friendly state.
+ *
+ * GPS-only: vision/ was removed (see README) — the aircraft camera preview is still shown
+ * to the operator (sdk/CameraPreviewScreen) purely for situational awareness, but nothing
+ * here reads its frames anymore. Following is driven entirely by the controller phone's
+ * own GPS (location/SubjectLocationProvider) and aimed by [GimbalController], not vision.
  */
 class WingmanViewModel(application: Application) : AndroidViewModel(application) {
 
     private val aircraftConnectionRepository = AircraftConnectionRepository()
     private val perceptionRepository = PerceptionRepository()
     private val subjectLocationProvider = SubjectLocationProvider(application)
-    private val subjectDetector = SubjectDetector(application)
-    private val subjectTracker = SubjectTracker(subjectDetector, TemplateMatchBoxTracker())
-    val tapToSelectHandler = TapToSelectHandler(subjectTracker)
-
-    private val videoFeedRepository = VideoFeedRepository(ComponentIndexType.LEFT_OR_MAIN)
-
-    private val _latestFrame = MutableStateFlow<Bitmap?>(null)
-    /** Latest decoded DJI aircraft-camera frame, for MainActivity's tap-to-select gesture
-     *  to hand off to [tapToSelectHandler] — the real-flight-path equivalent of
-     *  VisionTestViewModel's identically-named property for the phone-camera test path. */
-    val latestFrame: StateFlow<Bitmap?> get() = _latestFrame.asStateFlow()
-
-    private val _trackingResultFlow = MutableStateFlow<TrackingResult>(TrackingResult.NotStarted)
+    private val gimbalController = GimbalController()
 
     private val commandFlowHolder = MutableStateFlow(com.pelotom89.wingman.sdk.VirtualStickCommand.ZERO)
     private val overrideActiveHolder = MutableStateFlow(false)
@@ -65,7 +49,6 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     private val flightSafetyActionsController = FlightSafetyActionsController()
 
     private val flightStateMachine = FlightStateMachine(
-        trackingResultFlow = _trackingResultFlow,
         telemetryFlow = aircraftConnectionRepository.telemetryFlow,
         obstacleSnapshotFlow = perceptionRepository.obstacleSnapshotFlow,
         locationFixFlow = subjectLocationProvider.fixFlow, // Flow<out T> covariance: LocationFix satisfies LocationFix?
@@ -83,15 +66,12 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             flightStateMachine.commandFlow.collect { commandFlowHolder.value = it }
         }
-        // Every DJI aircraft-camera frame flows through here into both the UI preview's
-        // tap-to-select gesture (via [latestFrame]) and the tracker itself -- this is the
-        // real-flight-path counterpart to VisionTestViewModel's identical frame-to-tracker
-        // wiring for the phone-camera test path.
+        // Gimbal aiming is independent of the VirtualStick command path entirely -- see
+        // FlightCommandCalculator's header comment on why the aircraft yaws to face the
+        // subject while the gimbal only ever pitches (no gimbal yaw needed or used).
         viewModelScope.launch {
-            videoFeedRepository.frameFlow.collect { videoFrame ->
-                val bitmap = videoFrame.toBitmapOrNull() ?: return@collect
-                _latestFrame.value = bitmap
-                _trackingResultFlow.value = subjectTracker.onFrame(bitmap)
+            flightStateMachine.gimbalPitchDegreesFlow.collect { pitchDegrees ->
+                gimbalController.rotateTo(pitchDegrees, 0.0)
             }
         }
         // Fires once per transition INTO a new state class (distinctUntilChangedBy keys
@@ -115,17 +95,19 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
 
     fun onManualOverrideCleared() = manualOverrideGate.clear()
 
-    fun onSubjectSelected() {
+    /** Operator action (a button in MainActivity's flight screen, replacing the old
+     *  tap-to-select-a-subject gesture) — the subject is always "whoever is carrying this
+     *  phone," so there's nothing to select, just a decision to start. */
+    fun onStartFollowingPressed() {
         flightStateMachine.armLaunchPoint(
             telemetry.value?.let { LatLon(it.latitude, it.longitude) } ?: return,
         )
-        flightStateMachine.startTracking()
+        flightStateMachine.startFollowing()
     }
 
     override fun onCleared() {
         super.onCleared()
         virtualStickController.stop()
-        subjectDetector.close()
         flightLogger.close()
     }
 }

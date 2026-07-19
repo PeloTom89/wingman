@@ -36,8 +36,7 @@ fun HudOverlay(flightState: FlightState, telemetry: AircraftTelemetry?) {
 private fun FlightState.label(): String = when (this) {
     is FlightState.Idle -> "IDLE"
     is FlightState.ManualOverride -> "MANUAL OVERRIDE"
-    is FlightState.VisualTrack -> "VISUAL TRACK"
-    is FlightState.GpsGuided -> "GPS GUIDED"
+    is FlightState.Following -> "FOLLOWING"
     is FlightState.ReturnToHome -> "RETURN TO HOME — $reason"
     is FlightState.EmergencyStop -> "EMERGENCY STOP — $reason"
 }
@@ -45,8 +44,7 @@ private fun FlightState.label(): String = when (this) {
 private fun FlightState.color(): Color = when (this) {
     is FlightState.Idle -> Color.Gray
     is FlightState.ManualOverride -> Color.Yellow
-    is FlightState.VisualTrack -> Color.Green
-    is FlightState.GpsGuided -> Color.Cyan
+    is FlightState.Following -> Color.Green
     is FlightState.ReturnToHome -> Color(0xFFFFA500) // orange
     is FlightState.EmergencyStop -> Color.Red
 }

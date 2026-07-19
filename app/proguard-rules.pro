@@ -4,6 +4,3 @@
 -keep class dji.** { *; }
 -keep class dji.v5.** { *; }
 -dontwarn dji.**
-
--keep class com.google.mediapipe.** { *; }
--dontwarn com.google.mediapipe.**

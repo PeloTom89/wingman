@@ -11,10 +11,9 @@ import dji.v5.manager.interfaces.ICameraStreamManager
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 
 /**
- * Renders the live feed via DJI's own camera-stream-to-Surface path (efficient native
- * decode-to-display), separate from sdk/VideoFeedRepository's raw frame listener that
- * feeds the vision pipeline — both read the same underlying stream without forcing a
- * second software decode for display purposes.
+ * Renders the aircraft's live camera feed via DJI's own camera-stream-to-Surface path
+ * (efficient native decode-to-display) — purely for the operator's situational awareness.
+ * GPS-only following (see README) reads nothing from this stream; it's display-only.
  */
 @Composable
 fun CameraPreviewScreen(cameraIndex: ComponentIndexType, modifier: Modifier = Modifier) {

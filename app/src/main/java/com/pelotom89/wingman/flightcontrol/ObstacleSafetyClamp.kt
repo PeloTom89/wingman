@@ -17,9 +17,8 @@ import kotlin.math.hypot
  * exhaustively unit-testable per the plan's testing note, with zero SDK/threading
  * dependencies to get in the way of that.
  *
- * Applied LAST, after [SafetyLimits.clampSpeed], in every flight state — VisualTrack and
- * GpsGuided both route their proposed command through here before it reaches
- * VirtualStickController.
+ * Applied LAST, after [SafetyLimits.clampSpeed], on every proposed command in Following —
+ * FlightStateMachine routes it through here before it reaches VirtualStickController.
  *
  * Reworked against the REAL MSDK V5 perception API (see sdk/PerceptionRepository.kt's
  * header comment): there are no discrete forward/backward/left/right readings, only a

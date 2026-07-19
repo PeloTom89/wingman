@@ -18,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 
-private enum class Screen { PREFLIGHT, VISION_TEST, FLIGHT }
+private enum class Screen { PREFLIGHT, FLIGHT }
 
 class MainActivity : ComponentActivity() {
 
@@ -37,7 +37,6 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.BLUETOOTH,
                 Manifest.permission.BLUETOOTH_ADMIN,
-                Manifest.permission.CAMERA,
             ),
         )
 
@@ -54,17 +53,15 @@ class MainActivity : ComponentActivity() {
                         registrationState = registrationState,
                         hasGpsFix = telemetry != null,
                         onProceed = { screen = Screen.FLIGHT },
-                        onTestVisionPipeline = { screen = Screen.VISION_TEST },
                     )
-                    Screen.VISION_TEST -> VisionTestScreen(onBack = { screen = Screen.PREFLIGHT })
                     Screen.FLIGHT -> Box(modifier = Modifier.fillMaxSize()) {
                         CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
-                        TapToSelectOverlay { left, top, right, bottom, w, h ->
-                            val frame = viewModel.latestFrame.value ?: return@TapToSelectOverlay
-                            viewModel.tapToSelectHandler.onBoxSelected(frame, left, top, right, bottom, w, h)
-                            viewModel.onSubjectSelected()
-                        }
                         HudOverlay(flightState = flightState, telemetry = telemetry)
+                        StartFollowingButton(
+                            flightState = flightState,
+                            onPressed = { viewModel.onStartFollowingPressed() },
+                            modifier = Modifier.align(Alignment.BottomStart),
+                        )
                         ManualOverrideButton(
                             onPressed = { viewModel.onManualOverridePressed() },
                             modifier = Modifier.align(Alignment.BottomEnd),

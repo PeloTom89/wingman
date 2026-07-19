@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.pelotom89.wingman.sdk.SdkRegistrationState
 
 /**
- * Gates Idle -> VisualTrack on SDK registration + a live aircraft connection + a GPS fix
+ * Gates Idle -> Following on SDK registration + a live aircraft connection + a GPS fix
  * being available, AND an explicit VLOS acknowledgment EVERY session — per the plan, this
  * is the one legal responsibility (the pilot keeping the aircraft itself within visual
  * line of sight, regardless of whether the subject is in frame) that software cannot
@@ -33,7 +33,6 @@ fun PreflightChecklistScreen(
     registrationState: SdkRegistrationState,
     hasGpsFix: Boolean,
     onProceed: () -> Unit,
-    onTestVisionPipeline: () -> Unit,
 ) {
     var vlosAcknowledged by remember { mutableStateOf(false) }
 
@@ -65,13 +64,6 @@ fun PreflightChecklistScreen(
 
         Button(onClick = onProceed, enabled = allReady) {
             Text("Begin flight")
-        }
-
-        // No DJI/GPS gating -- phone-camera-only, see ui/VisionTestScreen.kt. Exists so
-        // the detect/track pipeline (Milestone 2) is testable before any drone hardware
-        // is available, not just after the checklist above is satisfied.
-        Button(onClick = onTestVisionPipeline) {
-            Text("Test vision pipeline (phone camera, no drone)")
         }
     }
 }
