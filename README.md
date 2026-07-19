@@ -209,6 +209,18 @@ prerequisite for testing it safely.
   for 35+ seconds including active tracking; revisit GPU only if CPU inference proves to
   be an actual bottleneck on real hardware, and expect this to be device-specific — it may
   behave differently on other phones.
+- **All vision-pipeline testing so far has been close-up and indoor** (a face a couple
+  feet from the phone). The actual deployment target — a rider on a bike, tens of meters
+  out, most of their visible surface being helmet/jersey/bike rather than skin — is a
+  materially different detection problem that hasn't been tested at all yet:
+  `TemplateMatchBoxTracker`'s bridging match is now RGB-color-based specifically for this
+  (see its header comment — colored gear against comparatively neutral road/grass/sky is
+  the intended signal, not skin tone, which was tried and reverted as actively wrong for a
+  geared-up rider), but EfficientDet-Lite0 itself is a small, mobile-optimized model and
+  its accuracy on a small/distant "person" instance is unverified and may simply be worse
+  than what close-up indoor testing has shown — that's a model-capability question, not
+  something the bridging tracker can compensate for. Field-test at realistic range before
+  trusting this for anything beyond continued development.
 
 `ReturnToHome`/`EmergencyStop` DO now trigger real aircraft behavior —
 `sdk/FlightSafetyActionsController.kt` calls the native `KeyStartGoHome`/

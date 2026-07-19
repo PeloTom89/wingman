@@ -8,13 +8,24 @@ import kotlin.math.roundToInt
  * reduced cadence, not every frame). Replaces the honest-placeholder `CoastingBoxTracker`
  * (which assumed zero motion and would drift badly on any moving subject).
  *
- * Approach: grayscale template matching (mean absolute difference over a downscaled patch,
- * searched across a window around the last known position) rather than optical flow or a
- * library tracker (OpenCV CSRT/KCF) — deliberately: no new native dependency, cheap enough
- * to run every bridge frame on a mid-range phone, and simple enough to keep the scoring
- * math ([findBestMatch]) pure and unit-testable, independent of any Bitmap/Android API.
- * It's a short-term bridge only — [SubjectTracker] re-anchors the template on every fresh
- * detector match, so this never has to track for more than a few frames unassisted.
+ * Approach: RGB color template matching (mean absolute difference across all three channels
+ * over a downscaled patch, searched across a window around the last known position) rather
+ * than optical flow or a library tracker (OpenCV CSRT/KCF) — deliberately: no new native
+ * dependency, cheap enough to run every bridge frame on a mid-range phone, and simple enough
+ * to keep the scoring math ([findBestMatch]) pure and unit-testable, independent of any
+ * Bitmap/Android API. It's a short-term bridge only — [SubjectTracker] re-anchors the
+ * template on every fresh detector match, so this never has to track for more than a few
+ * frames unassisted.
+ *
+ * Color, not grayscale: this is the real target use case, not just a bench test — tracking
+ * a rider at a distance on a bike, where luminance-only matching drifted onto same-brightness
+ * background (a pillow/wall in early indoor testing; road/grass/sky in the field is the same
+ * failure mode). Color is a much stronger discriminator than brightness alone for a
+ * colored jersey/helmet/bike against a comparatively neutral background, and unlike a
+ * skin-tone-based check (tried and reverted — a geared-up, helmeted, gloved rider at
+ * distance shows little to no visible skin, so that heuristic actively works against the
+ * real deployment scenario), color matching doesn't assume anything about what the subject
+ * looks like.
  */
 class TemplateMatchBoxTracker(
     private val patchSize: Int = 24,
@@ -23,11 +34,11 @@ class TemplateMatchBoxTracker(
     private val maxAcceptableMeanAbsDifference: Double = 45.0,
 ) : BoxTracker {
 
-    private var template: GrayscalePatch? = null
+    private var template: ColorPatch? = null
     private var lastBox: BoundingBox? = null
 
     override fun init(frame: Bitmap, box: BoundingBox) {
-        template = extractGrayscalePatch(frame, box, patchSize)
+        template = extractColorPatch(frame, box, patchSize)
         lastBox = box
     }
 
@@ -39,7 +50,7 @@ class TemplateMatchBoxTracker(
         // around the previous box's center so [findBestMatch] only has to scan a bounded
         // local window rather than the whole frame.
         val searchSize = patchSize + 2 * searchRadiusPatchPixels
-        val searchArea = extractGrayscalePatch(frame, previousBox, searchSize) ?: return null
+        val searchArea = extractColorPatch(frame, previousBox, searchSize) ?: return null
 
         val match = findBestMatch(tmpl, searchArea, searchStep) ?: return null
         if (match.meanAbsDifference > maxAcceptableMeanAbsDifference) return null
@@ -65,7 +76,7 @@ class TemplateMatchBoxTracker(
         return newBox
     }
 
-    private fun extractGrayscalePatch(frame: Bitmap, box: BoundingBox, targetSize: Int): GrayscalePatch? {
+    private fun extractColorPatch(frame: Bitmap, box: BoundingBox, targetSize: Int): ColorPatch? {
         val left = ((box.centerX - box.width / 2f) * frame.width).roundToInt().coerceIn(0, frame.width - 1)
         val top = ((box.centerY - box.height / 2f) * frame.height).roundToInt().coerceIn(0, frame.height - 1)
         val right = ((box.centerX + box.width / 2f) * frame.width).roundToInt().coerceIn(left + 1, frame.width)
@@ -82,32 +93,23 @@ class TemplateMatchBoxTracker(
         )
         val pixels = IntArray(targetSize * targetSize)
         scaled.getPixels(pixels, 0, targetSize, 0, 0, targetSize, targetSize)
-        val gray = IntArray(pixels.size) { i -> luminanceOf(pixels[i]) }
-        return GrayscalePatch(gray, targetSize, targetSize)
-    }
-
-    private fun luminanceOf(argb: Int): Int {
-        val r = (argb shr 16) and 0xFF
-        val g = (argb shr 8) and 0xFF
-        val b = argb and 0xFF
-        // Standard luma weights; precision beyond an Int isn't worth it for a match score
-        // that's already only compared relatively, not against an absolute reference.
-        return ((r * 299 + g * 587 + b * 114) / 1000)
+        return ColorPatch(pixels, targetSize, targetSize)
     }
 }
 
-/** Grayscale luminance values (0-255), row-major, [width] x [height]. */
-data class GrayscalePatch(val pixels: IntArray, val width: Int, val height: Int)
+/** Packed ARGB pixels, row-major, [width] x [height]. */
+data class ColorPatch(val pixels: IntArray, val width: Int, val height: Int)
 
 data class MatchResult(val offsetX: Int, val offsetY: Int, val meanAbsDifference: Double)
 
 /**
  * Slides [template] across [searchArea] at [step]-pixel intervals, scoring each position by
- * mean absolute luminance difference (lower = better match). Pure array math, no Bitmap/
- * Android dependency — this is the piece the plan's testing note calls out as unit-testable
- * independent of any camera/model.
+ * mean absolute difference across all three RGB channels (lower = better match; averaged
+ * per-channel so the result stays on a familiar 0-255-ish scale regardless of using 3
+ * channels instead of 1). Pure array math, no Bitmap/Android dependency — this is the piece
+ * the plan's testing note calls out as unit-testable independent of any camera/model.
  */
-fun findBestMatch(template: GrayscalePatch, searchArea: GrayscalePatch, step: Int = 2): MatchResult? {
+fun findBestMatch(template: ColorPatch, searchArea: ColorPatch, step: Int = 2): MatchResult? {
     val maxOffsetX = searchArea.width - template.width
     val maxOffsetY = searchArea.height - template.height
     if (maxOffsetX < 0 || maxOffsetY < 0) return null
@@ -128,15 +130,26 @@ fun findBestMatch(template: GrayscalePatch, searchArea: GrayscalePatch, step: In
     return best
 }
 
-private fun meanAbsDifference(template: GrayscalePatch, searchArea: GrayscalePatch, offsetX: Int, offsetY: Int): Double {
+private fun meanAbsDifference(template: ColorPatch, searchArea: ColorPatch, offsetX: Int, offsetY: Int): Double {
     var sum = 0L
     for (y in 0 until template.height) {
         val searchRowBase = (offsetY + y) * searchArea.width + offsetX
         val templateRowBase = y * template.width
         for (x in 0 until template.width) {
-            val diff = template.pixels[templateRowBase + x] - searchArea.pixels[searchRowBase + x]
-            sum += kotlin.math.abs(diff)
+            val a = template.pixels[templateRowBase + x]
+            val b = searchArea.pixels[searchRowBase + x]
+            sum += channelAbsDifference(a, b)
         }
     }
-    return sum.toDouble() / (template.width * template.height)
+    // /3 to average across channels, keeping the metric on a familiar 0-255-ish per-channel
+    // scale (so maxAcceptableMeanAbsDifference's default didn't need re-tuning when this
+    // moved from single-channel luminance to 3-channel color).
+    return sum.toDouble() / (template.width * template.height * 3)
+}
+
+private fun channelAbsDifference(argbA: Int, argbB: Int): Int {
+    val rDiff = kotlin.math.abs(((argbA shr 16) and 0xFF) - ((argbB shr 16) and 0xFF))
+    val gDiff = kotlin.math.abs(((argbA shr 8) and 0xFF) - ((argbB shr 8) and 0xFF))
+    val bDiff = kotlin.math.abs((argbA and 0xFF) - (argbB and 0xFF))
+    return rDiff + gDiff + bDiff
 }
