@@ -12,6 +12,13 @@ import kotlin.math.hypot
  * The detection-matching math ([matchDetectionToPreviousBox]) is kept as a standalone pure
  * function specifically so it's unit-testable against recorded box sequences without any
  * camera/model dependency, per the plan's testing note.
+ *
+ * Re-acquisition has two modes, gated on [REACQUISITION_RELAXED_AFTER_LOST_FRAMES]: while
+ * only briefly lost, matching stays strict (proximity + size vs. the last known box) so a
+ * one-frame hiccup doesn't snap onto a different nearby person; once genuinely lost for a
+ * while, that proximity constraint is dropped entirely (confirmed on-device it otherwise
+ * blocks re-acquisition forever if the subject leaves frame and returns anywhere other
+ * than exactly where they were last seen).
  */
 class SubjectTracker(
     private val detector: SubjectDetector,
@@ -38,7 +45,18 @@ class SubjectTracker(
 
         val result: BoundingBox? = if (runDetectionThisFrame) {
             val detections = detector.detectPeople(frame)
-            val matched = matchDetectionToPreviousBox(detections, previousBox)
+            // Once genuinely lost (not just a brief bridge-frame gap), matchDetectionToPreviousBox's
+            // proximity-to-last-known-position gate becomes counterproductive: the subject may have
+            // walked fully out of frame and back in somewhere else entirely, and requiring the new
+            // detection to land within maxCenterDistance of a now-stale position was blocking
+            // re-acquisition indefinitely (confirmed on-device: leaving frame and returning never
+            // re-locked). Past the threshold, fall back to the most confident detection with no
+            // positional constraint at all.
+            val matched = if (framesSinceSeen >= REACQUISITION_RELAXED_AFTER_LOST_FRAMES) {
+                detections.maxByOrNull { it.confidence }
+            } else {
+                matchDetectionToPreviousBox(detections, previousBox)
+            }
             if (matched != null) {
                 boxTracker.init(frame, matched.box) // re-anchor the bridge tracker on fresh detection
                 matched.box
@@ -61,6 +79,13 @@ class SubjectTracker(
 
     private companion object {
         const val DEFAULT_DETECTION_INTERVAL_FRAMES = 4 // ~6-10Hz detection at 30fps decode, per plan
+
+        // ~0.5-0.7s at 30fps / detectionIntervalFrames=4 (roughly 4-5 missed detection
+        // cycles) -- long enough that a brief occlusion or one bad detection frame stays
+        // in the strict proximity-matched mode (avoids snapping to a different nearby
+        // person mid-track), short enough that "walked out of frame and back" doesn't
+        // feel broken.
+        const val REACQUISITION_RELAXED_AFTER_LOST_FRAMES = 15
     }
 }
 
