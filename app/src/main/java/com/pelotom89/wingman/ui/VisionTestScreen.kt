@@ -12,7 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -46,8 +46,15 @@ fun VisionTestScreen(onBack: () -> Unit, viewModel: VisionTestViewModel = viewMo
     val trackingResult by viewModel.trackingResult.collectAsStateWithLifecycle()
     val fps by viewModel.framesPerSecond.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
+    // DisposableEffect, not LaunchedEffect(Unit): this screen is reachable multiple times
+    // per app session (Preflight <-> VisionTest isn't a real back-stack, just a local
+    // `screen` toggle in MainActivity), and the ViewModel is Activity-scoped rather than
+    // screen-scoped -- so the camera needs an explicit stop() on leaving, or it keeps
+    // running against a PreviewView nobody can see (see VisionTestViewModel.start's
+    // header comment for the black-screen bug this fixes).
+    DisposableEffect(lifecycleOwner, previewView) {
         viewModel.start(lifecycleOwner, previewView)
+        onDispose { viewModel.stop() }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
