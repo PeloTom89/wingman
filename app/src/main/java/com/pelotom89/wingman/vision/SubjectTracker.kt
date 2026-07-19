@@ -134,6 +134,27 @@ fun matchDetectionToPreviousBox(
 }
 
 /**
+ * Hit-tests a tap (normalized [0,1] frame coordinates) against live, unseeded detections —
+ * the "tap the person you want to track" selection flow: [detections] here are ALL current
+ * detections shown to the user (not yet narrowed to one subject), unlike
+ * [matchDetectionToPreviousBox], which matches against a single already-tracked box.
+ * If the tap lands inside more than one overlapping box, picks the smallest (most specific/
+ * closest) one, on the theory that a precise tap is more likely aimed at whichever subject
+ * is nearest to the camera. Pure and unit-tested independent of any camera/model.
+ */
+fun findTappedDetection(detections: List<Detection>, tapX: Float, tapY: Float): Detection? {
+    return detections
+        .filter { d ->
+            val left = d.box.centerX - d.box.width / 2f
+            val right = d.box.centerX + d.box.width / 2f
+            val top = d.box.centerY - d.box.height / 2f
+            val bottom = d.box.centerY + d.box.height / 2f
+            tapX in left..right && tapY in top..bottom
+        }
+        .minByOrNull { it.box.area }
+}
+
+/**
  * Bridges the gap between detector calls. NOT a real implementation yet: a production
  * tracker needs actual frame-to-frame motion estimation (e.g. OpenCV CSRT/KCF or
  * Lucas-Kanade optical flow on the box corners/centroid, per the plan) — neither OpenCV

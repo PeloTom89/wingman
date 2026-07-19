@@ -6,6 +6,7 @@ import androidx.camera.view.PreviewView
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.pelotom89.wingman.vision.Detection
 import com.pelotom89.wingman.vision.PhoneCameraFrameSource
 import com.pelotom89.wingman.vision.SubjectDetector
 import com.pelotom89.wingman.vision.SubjectTracker
@@ -24,6 +25,15 @@ import kotlinx.coroutines.launch
  * specifically to exercise vision/SubjectDetector.kt + SubjectTracker.kt in isolation (per
  * the plan's Milestone 2), using the phone's own camera instead of the DJI aircraft stream,
  * with no flight-control machinery involved at all.
+ *
+ * Two phases, both driven by the same frame loop in [start], gated on [hasSelectedSubject]
+ * (see that field's comment for why it's a plain flag, not derived from [trackingResult]):
+ *  - Before a subject is selected: runs raw detection at a reduced cadence and publishes
+ *    ALL current candidates via [candidateDetections], for the UI to draw and let the user
+ *    tap one directly — added after user feedback that dragging a box was unnecessary
+ *    friction when the detector already knows where the people are.
+ *  - After selection ([TapToSelectHandler.onDetectionTapped] seeds the tracker): switches
+ *    to the normal single-subject [SubjectTracker.onFrame] flow, same as before.
  */
 class VisionTestViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -39,6 +49,11 @@ class VisionTestViewModel(application: Application) : AndroidViewModel(applicati
     private val _trackingResult = MutableStateFlow<TrackingResult>(TrackingResult.NotStarted)
     val trackingResult: StateFlow<TrackingResult> get() = _trackingResult.asStateFlow()
 
+    /** All live "person" detections while no subject has been selected yet — empty once
+     *  tracking starts. Only meaningful alongside [trackingResult] being [TrackingResult.NotStarted]. */
+    private val _candidateDetections = MutableStateFlow<List<Detection>>(emptyList())
+    val candidateDetections: StateFlow<List<Detection>> get() = _candidateDetections.asStateFlow()
+
     /** Rolling once-per-second FPS of frames actually reaching the tracker — the thing
      *  Milestone 2 asks to check ("latency/frame-drop against live decode load"). */
     private val _framesPerSecond = MutableStateFlow(0.0)
@@ -47,6 +62,17 @@ class VisionTestViewModel(application: Application) : AndroidViewModel(applicati
     private var framesSinceWindowStart = 0
     private var fpsWindowStartMillis = System.currentTimeMillis()
     private var cameraJob: Job? = null
+    private var preSelectionFrameCount = 0
+
+    // NOT derived from _trackingResult -- that was a real bug. _trackingResult only ever
+    // gets updated by calling subjectTracker.onFrame(), which was gated behind "still
+    // NotStarted"; after seeding, _trackingResult stayed NotStarted forever (nothing else
+    // ever set it), so the frame loop below could never escape the pre-selection branch to
+    // make the one call that would've updated it -- a permanent deadlock. Confirmed
+    // on-device: seed() visibly succeeded (logged "seeded=true") but the UI stayed stuck
+    // showing "tap a person" forever. This flag is set directly and independently by
+    // [onScreenTapped] instead.
+    private var hasSelectedSubject = false
 
     /**
      * This ViewModel is Activity-scoped (survives Compose navigating away and back — there's
@@ -64,9 +90,36 @@ class VisionTestViewModel(application: Application) : AndroidViewModel(applicati
         cameraJob = viewModelScope.launch {
             phoneCameraFrameSource.frameFlow(lifecycleOwner, previewView).collect { frame ->
                 _latestFrame.value = frame
-                _trackingResult.value = subjectTracker.onFrame(frame)
+                if (hasSelectedSubject) {
+                    _trackingResult.value = subjectTracker.onFrame(frame)
+                } else {
+                    runPreSelectionDetection(frame)
+                }
                 recordFrameForFpsWindow()
             }
+        }
+    }
+
+    /** Detecting every frame would compete with the same CPU budget the (already CPU-delegate,
+     *  see SubjectDetector) detector needs once tracking starts — reduced cadence keeps the
+     *  live candidate boxes responsive without starving frame throughput. */
+    private fun runPreSelectionDetection(frame: Bitmap) {
+        preSelectionFrameCount++
+        if (preSelectionFrameCount % PRE_SELECTION_DETECTION_INTERVAL_FRAMES == 0) {
+            _candidateDetections.value = subjectDetector.detectPeople(frame)
+        }
+    }
+
+    /** Called when the user taps the live preview before a subject is selected. Hit-tests
+     *  the tap against [candidateDetections] and seeds tracking if it landed on one. */
+    fun onScreenTapped(tapXPx: Float, tapYPx: Float, screenWidthPx: Float, screenHeightPx: Float) {
+        val frame = _latestFrame.value ?: return
+        val seeded = tapToSelectHandler.onDetectionTapped(
+            frame, _candidateDetections.value, tapXPx, tapYPx, screenWidthPx, screenHeightPx,
+        )
+        if (seeded) {
+            hasSelectedSubject = true
+            _candidateDetections.value = emptyList()
         }
     }
 
@@ -93,5 +146,9 @@ class VisionTestViewModel(application: Application) : AndroidViewModel(applicati
         super.onCleared()
         subjectDetector.close()
         phoneCameraFrameSource.close()
+    }
+
+    private companion object {
+        const val PRE_SELECTION_DETECTION_INTERVAL_FRAMES = 3
     }
 }

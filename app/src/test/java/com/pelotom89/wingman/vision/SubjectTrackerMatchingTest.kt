@@ -56,4 +56,42 @@ class SubjectTrackerMatchingTest {
 
         assertEquals(same, matched)
     }
+
+    // --- findTappedDetection: the "tap the person you want to track" selection flow ---
+
+    @Test
+    fun `finds the detection whose box contains the tap point`() {
+        val left = Detection(BoundingBox(0.2f, 0.5f, 0.2f, 0.3f), confidence = 0.9f)
+        val right = Detection(BoundingBox(0.8f, 0.5f, 0.2f, 0.3f), confidence = 0.9f)
+
+        val tapped = findTappedDetection(listOf(left, right), tapX = 0.78f, tapY = 0.5f)
+
+        assertEquals(right, tapped)
+    }
+
+    @Test
+    fun `returns null when the tap doesn't land inside any detection`() {
+        val onlyDetection = Detection(BoundingBox(0.2f, 0.5f, 0.2f, 0.3f), confidence = 0.9f)
+
+        val tapped = findTappedDetection(listOf(onlyDetection), tapX = 0.9f, tapY = 0.9f)
+
+        assertNull(tapped)
+    }
+
+    @Test
+    fun `prefers the smallest (most specific) box when the tap lands inside overlapping detections`() {
+        // A closer/more specific person detection nested inside a larger, looser one at
+        // the same point -- e.g. two overlapping "person" detections from a busy scene.
+        val large = Detection(BoundingBox(0.5f, 0.5f, 0.6f, 0.6f), confidence = 0.8f)
+        val small = Detection(BoundingBox(0.5f, 0.5f, 0.1f, 0.1f), confidence = 0.85f)
+
+        val tapped = findTappedDetection(listOf(large, small), tapX = 0.5f, tapY = 0.5f)
+
+        assertEquals(small, tapped)
+    }
+
+    @Test
+    fun `returns null for an empty candidate list`() {
+        assertNull(findTappedDetection(emptyList(), tapX = 0.5f, tapY = 0.5f))
+    }
 }

@@ -177,8 +177,9 @@ prerequisite for testing it safely.
    then MSDK V5's built-in flight simulator for a hover test.
 2. **Vision pipeline standalone, no flight control wired.** ✅ Achievable and verified
    today with zero DJI hardware — open `VisionTestScreen` (button on the preflight
-   screen), drag a box around yourself, watch it track. When an aircraft is available,
-   also re-verify against the real DJI camera stream, not just the phone's own camera.
+   screen), tap a live-detected person to track them (auto-detection runs continuously
+   before selection — no drag gesture needed). When an aircraft is available, also
+   re-verify against the real DJI camera stream, not just the phone's own camera.
 3. **VisualTrack flight logic, open field, low speed/altitude.** Set `SafetyLimits` very
    conservatively (~2-3 m/s, 5-8m altitude) to start.
 4. **GpsGuided fallback via deliberate occlusion.** Real hardware, spotter present.
