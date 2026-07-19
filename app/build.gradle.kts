@@ -161,6 +161,22 @@ dependencies {
     // not full per-frame detection, to avoid contending with live video decode).
     implementation("com.google.mediapipe:tasks-vision:0.10.14")
 
+    // --- CameraX (phone-camera test source only, see vision/PhoneCameraFrameSource.kt) ---
+    // Used exclusively by the standalone VisionTestScreen so the detect/track pipeline is
+    // exercisable without a DJI aircraft connected -- NOT part of the real flight path,
+    // which reads frames from sdk/VideoFeedRepository (the DJI aircraft camera stream)
+    // instead.
+    // Pinned to 1.3.4, not the current latest (1.6.x) -- newer CameraX releases require
+    // AGP 8.9.1+ and compileSdk 36, which we're deliberately not bumping to avoid
+    // destabilizing the carefully-verified DJI SDK toolchain (AGP 8.6.0 / compileSdk 34,
+    // see README's "Resolved: launch crash on Android 16"). Revisit if compileSdk needs
+    // to move for another reason anyway.
+    val cameraXVersion = "1.3.4"
+    implementation("androidx.camera:camera-core:$cameraXVersion")
+    implementation("androidx.camera:camera-camera2:$cameraXVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraXVersion")
+    implementation("androidx.camera:camera-view:$cameraXVersion")
+
     // --- Testing ---
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")

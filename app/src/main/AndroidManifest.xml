@@ -21,6 +21,13 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- Phone's own camera, used only by the standalone VisionTestScreen (vision/
+         PhoneCameraFrameSource.kt) to exercise the detect/track pipeline without a DJI
+         aircraft connected. Not used anywhere in the real flight path. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
     <application
         android:name=".sdk.WingmanApplication"
         android:allowBackup="false"

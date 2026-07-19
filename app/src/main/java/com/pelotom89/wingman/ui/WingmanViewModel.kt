@@ -1,6 +1,7 @@
 package com.pelotom89.wingman.ui
 
 import android.app.Application
+import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pelotom89.wingman.core.FlightLogger
@@ -16,14 +17,17 @@ import com.pelotom89.wingman.sdk.SdkRegistrationState
 import com.pelotom89.wingman.sdk.VideoFeedRepository
 import com.pelotom89.wingman.sdk.VirtualStickController
 import com.pelotom89.wingman.sdk.WingmanApplication
-import com.pelotom89.wingman.vision.CoastingBoxTracker
+import com.pelotom89.wingman.sdk.toBitmapOrNull
 import com.pelotom89.wingman.vision.SubjectDetector
 import com.pelotom89.wingman.vision.SubjectTracker
 import com.pelotom89.wingman.vision.TapToSelectHandler
+import com.pelotom89.wingman.vision.TemplateMatchBoxTracker
 import com.pelotom89.wingman.vision.TrackingResult
+import dji.sdk.keyvalue.value.common.ComponentIndexType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -40,8 +44,16 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     private val perceptionRepository = PerceptionRepository()
     private val subjectLocationProvider = SubjectLocationProvider(application)
     private val subjectDetector = SubjectDetector(application)
-    private val subjectTracker = SubjectTracker(subjectDetector, CoastingBoxTracker())
+    private val subjectTracker = SubjectTracker(subjectDetector, TemplateMatchBoxTracker())
     val tapToSelectHandler = TapToSelectHandler(subjectTracker)
+
+    private val videoFeedRepository = VideoFeedRepository(ComponentIndexType.LEFT_OR_MAIN)
+
+    private val _latestFrame = MutableStateFlow<Bitmap?>(null)
+    /** Latest decoded DJI aircraft-camera frame, for MainActivity's tap-to-select gesture
+     *  to hand off to [tapToSelectHandler] — the real-flight-path equivalent of
+     *  VisionTestViewModel's identically-named property for the phone-camera test path. */
+    val latestFrame: StateFlow<Bitmap?> get() = _latestFrame.asStateFlow()
 
     private val _trackingResultFlow = MutableStateFlow<TrackingResult>(TrackingResult.NotStarted)
 
@@ -70,6 +82,17 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     init {
         viewModelScope.launch {
             flightStateMachine.commandFlow.collect { commandFlowHolder.value = it }
+        }
+        // Every DJI aircraft-camera frame flows through here into both the UI preview's
+        // tap-to-select gesture (via [latestFrame]) and the tracker itself -- this is the
+        // real-flight-path counterpart to VisionTestViewModel's identical frame-to-tracker
+        // wiring for the phone-camera test path.
+        viewModelScope.launch {
+            videoFeedRepository.frameFlow.collect { videoFrame ->
+                val bitmap = videoFrame.toBitmapOrNull() ?: return@collect
+                _latestFrame.value = bitmap
+                _trackingResultFlow.value = subjectTracker.onFrame(bitmap)
+            }
         }
         // Fires once per transition INTO a new state class (distinctUntilChangedBy keys
         // on the class, not full equality) -- ReturnToHome/EmergencyStop carry a `reason`

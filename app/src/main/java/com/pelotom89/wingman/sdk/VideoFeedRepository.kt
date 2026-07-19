@@ -1,6 +1,7 @@
 package com.pelotom89.wingman.sdk
 
 import android.graphics.Bitmap
+import com.pelotom89.wingman.core.nv21ToBitmapOrNull
 import dji.v5.manager.datacenter.MediaDataCenter
 import dji.v5.manager.interfaces.ICameraStreamManager
 import kotlinx.coroutines.channels.awaitClose
@@ -49,9 +50,13 @@ data class VideoFrame(
 )
 
 fun VideoFrame.toBitmapOrNull(): Bitmap? {
-    // NV21 requested explicitly above (see addFrameListener call), so this should always
-    // be android.graphics.YuvImage-convertible via NV21 -> JPEG -> Bitmap, or a direct
-    // RenderScript/GPU YUV->RGB conversion for lower latency. Not yet implemented — see
-    // README's known gaps; wire this before vision/SubjectDetector.kt can consume frames.
-    return null
+    if (format != ICameraStreamManager.FrameFormat.NV21) return null
+    if (length <= 0) return null
+
+    val nv21 = if (offset == 0 && length == data.size) {
+        data
+    } else {
+        data.copyOfRange(offset, offset + length)
+    }
+    return nv21ToBitmapOrNull(nv21, widthPx, heightPx)
 }

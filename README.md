@@ -129,11 +129,11 @@ shared root cause across those reports too.
 ```
 app/src/main/java/com/pelotom89/wingman/
   sdk/            DJI SDK/telemetry — connection, VirtualStick command loop, perception, video, gimbal
-  vision/         on-device subject detection + tracking
+  vision/         on-device subject detection + tracking (+ PhoneCameraFrameSource, test-only)
   flightcontrol/  state machine, obstacle safety clamp, hard safety limits, manual override
   location/       phone GPS as subject-position proxy
-  ui/             Compose UI — camera preview, tap-to-select, HUD, override button
-  core/           shared dispatchers, structured flight logging
+  ui/             Compose UI — camera preview, tap-to-select, HUD, override button, VisionTestScreen
+  core/           shared dispatchers, structured flight logging, YUV->Bitmap conversion
 ```
 
 `flightcontrol/FlightStateMachine.kt` is the only place flight *policy* lives — every
@@ -142,14 +142,29 @@ other layer is a dumb data source or a dumb actuator. States: `Idle`, `ManualOve
 transition is debounced (`TrackingLossDebouncer.kt`) so a single dropped frame doesn't flap
 the aircraft's behavior.
 
+`vision/` is deliberately decoupled from where frames come from — `SubjectTracker.onFrame()`
+just takes a `Bitmap`. Two independent frame sources feed it: `sdk/VideoFeedRepository`
+(the real DJI aircraft camera stream) for actual flight, and `vision/PhoneCameraFrameSource`
+(CameraX, the phone's own camera) used ONLY by `ui/VisionTestScreen` so the detect/track
+pipeline is testable with no drone connected at all — see Milestone 2 below.
+
 ## What's actually tested, and what isn't
 
 There is no meaningful unit-test story for the flight-command loop itself — it's live
 sensor timing plus hardware physics, and needs the milestone progression below instead.
-What **is** unit tested (`app/src/test/`), because it's pure logic with no SDK dependency:
-`ObstacleSafetyClamp`'s clamping math, `SafetyLimits`' threshold/geofence/haversine math,
-`TrackingLossDebouncer`'s hysteresis timing, and `SubjectTracker`'s detection-matching
-logic. Run `./gradlew test` before touching any of these files.
+What **is** unit tested (`app/src/test/`, 32 tests), because it's pure logic with no SDK
+dependency: `ObstacleSafetyClamp`'s clamping math, `SafetyLimits`' threshold/geofence/
+haversine math, `TrackingLossDebouncer`'s hysteresis timing, `SubjectTracker`'s
+detection-matching logic, and `TemplateMatchBoxTracker`'s template-search math. Run
+`./gradlew test` before touching any of these files.
+
+Beyond unit tests: the vision pipeline (`SubjectDetector` + `SubjectTracker` +
+`TemplateMatchBoxTracker`) has been exercised **on a real device** end-to-end via
+`VisionTestScreen` — tap-to-select seeding a subject, sustained tracking, FPS readout —
+verified stable for 35+ continuous seconds with zero crashes (Moto G Play 2026). This is
+the same `vision/` code the real DJI flight path uses; only the frame *source* differs, so
+this is meaningful evidence beyond "it compiles," even though the DJI camera path itself
+hasn't been exercised yet (needs a connected aircraft).
 
 ## Milestones — build-and-test progression
 
@@ -158,8 +173,10 @@ prerequisite for testing it safely.
 
 1. **SDK connect + telemetry + manual VirtualStick smoke test.** Props-off bench test,
    then MSDK V5's built-in flight simulator for a hover test.
-2. **Vision pipeline standalone, no flight control wired.** Tap-to-select → detect → track,
-   check latency/frame-drop against live decode load. No aircraft flight needed.
+2. **Vision pipeline standalone, no flight control wired.** ✅ Achievable and verified
+   today with zero DJI hardware — open `VisionTestScreen` (button on the preflight
+   screen), drag a box around yourself, watch it track. When an aircraft is available,
+   also re-verify against the real DJI camera stream, not just the phone's own camera.
 3. **VisualTrack flight logic, open field, low speed/altitude.** Set `SafetyLimits` very
    conservatively (~2-3 m/s, 5-8m altitude) to start.
 4. **GpsGuided fallback via deliberate occlusion.** Real hardware, spotter present.
@@ -171,16 +188,6 @@ prerequisite for testing it safely.
 
 ## Known gaps (not yet implemented)
 
-- `vision/SubjectTracker.kt`'s `CoastingBoxTracker` is an honest placeholder (assumes no
-  motion between detections) — swap in a real frame-to-frame tracker (OpenCV CSRT/KCF, or
-  Lucas-Kanade optical flow) before Milestone 2 testing; coasting will drift badly on
-  anything but a near-stationary subject.
-- `sdk/VideoFeedRepository.kt`'s `toBitmapOrNull()` is unimplemented. The frame format IS
-  now confirmed (NV21, requested explicitly in `addFrameListener`) — what's missing is the
-  actual NV21 -> Bitmap conversion, needed before frames can reach the vision pipeline.
-- `ui/MainActivity.kt`'s tap-to-select callback doesn't yet pass the current video frame
-  into `TapToSelectHandler.onBoxSelected` — needs a "latest frame" holder shared between
-  `CameraPreviewScreen` and the gesture handler.
 - Perception data's units and ring-indexing convention are assumptions, not confirmed
   facts — see `sdk/PerceptionRepository.kt`'s header comment. Log raw `ObstacleData`
   values against a known real-world distance/direction before trusting
@@ -189,6 +196,19 @@ prerequisite for testing it safely.
   pipeline yet — VisualTrack currently re-centers the subject via aircraft yaw/pitch only
   (`FlightCommandCalculator`), not gimbal movement, even though the gimbal path would be
   cheaper/faster for small corrections (see that file's header comment).
+- The vision pipeline has only been verified against the phone's own camera
+  (`PhoneCameraFrameSource`), not yet the real DJI aircraft camera stream
+  (`VideoFeedRepository`) — same `vision/` code either way, but the DJI path itself
+  (frame delivery, NV21 format/timing from the actual aircraft) is unverified pending a
+  connected drone.
+- `vision/SubjectDetector.kt` runs MediaPipe on **CPU delegate, not GPU** — the GPU
+  delegate crashed intermittently on-device (Moto G Play 2026) with `ToTensorConverter:
+  input data size does not match expected size` after ~25 successful detections, not on
+  the first one, pointing at delegate/driver state rather than a per-frame input bug (a
+  raw-pixel-array Bitmap normalization was tried and did NOT fix it). CPU verified stable
+  for 35+ seconds including active tracking; revisit GPU only if CPU inference proves to
+  be an actual bottleneck on real hardware, and expect this to be device-specific — it may
+  behave differently on other phones.
 
 `ReturnToHome`/`EmergencyStop` DO now trigger real aircraft behavior —
 `sdk/FlightSafetyActionsController.kt` calls the native `KeyStartGoHome`/

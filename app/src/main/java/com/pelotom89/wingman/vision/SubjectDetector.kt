@@ -22,7 +22,19 @@ class SubjectDetector(context: Context) {
             .setBaseOptions(
                 BaseOptions.builder()
                     .setModelAssetPath(MODEL_ASSET_PATH)
-                    .setDelegate(Delegate.GPU)
+                    // CPU, not GPU: confirmed via a real crash on-device (Moto G Play
+                    // 2026) that the GPU delegate intermittently throws "ToTensorConverter:
+                    // input data size does not match expected size" -- not on the very
+                    // first inference, but after ~25 successful detections, which points
+                    // at GPU delegate/driver-side state (texture reallocation, thermal
+                    // throttling behavior, etc.) rather than a per-frame Bitmap shape bug;
+                    // a raw-pixel-array Bitmap normalization pass was tried first and did
+                    // NOT fix it, consistent with the delegate (not the input) being the
+                    // problem. CPU delegate verified stable on-device for 35+ seconds of
+                    // continuous detection, including through an active tap-to-select ->
+                    // tracking session, with zero crashes (vs. ~1 second under GPU).
+                    // CPU is slower; revisit if profiling shows it's the actual bottleneck.
+                    .setDelegate(Delegate.CPU)
                     .build(),
             )
             .setRunningMode(RunningMode.IMAGE)

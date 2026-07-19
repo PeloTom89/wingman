@@ -33,6 +33,7 @@ fun PreflightChecklistScreen(
     registrationState: SdkRegistrationState,
     hasGpsFix: Boolean,
     onProceed: () -> Unit,
+    onTestVisionPipeline: () -> Unit,
 ) {
     var vlosAcknowledged by remember { mutableStateOf(false) }
 
@@ -64,6 +65,13 @@ fun PreflightChecklistScreen(
 
         Button(onClick = onProceed, enabled = allReady) {
             Text("Begin flight")
+        }
+
+        // No DJI/GPS gating -- phone-camera-only, see ui/VisionTestScreen.kt. Exists so
+        // the detect/track pipeline (Milestone 2) is testable before any drone hardware
+        // is available, not just after the checklist above is satisfied.
+        Button(onClick = onTestVisionPipeline) {
+            Text("Test vision pipeline (phone camera, no drone)")
         }
     }
 }

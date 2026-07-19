@@ -18,6 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 
+private enum class Screen { PREFLIGHT, VISION_TEST, FLIGHT }
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: WingmanViewModel by viewModels()
@@ -35,31 +37,31 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.BLUETOOTH,
                 Manifest.permission.BLUETOOTH_ADMIN,
+                Manifest.permission.CAMERA,
             ),
         )
 
         setContent {
             MaterialTheme {
-                var preflightComplete by remember { mutableStateOf(false) }
+                var screen by remember { mutableStateOf(Screen.PREFLIGHT) }
 
                 val registrationState by viewModel.registrationState.collectAsStateWithLifecycle()
                 val flightState by viewModel.flightState.collectAsStateWithLifecycle()
                 val telemetry by viewModel.telemetry.collectAsStateWithLifecycle()
 
-                if (!preflightComplete) {
-                    PreflightChecklistScreen(
+                when (screen) {
+                    Screen.PREFLIGHT -> PreflightChecklistScreen(
                         registrationState = registrationState,
                         hasGpsFix = telemetry != null,
-                        onProceed = { preflightComplete = true },
+                        onProceed = { screen = Screen.FLIGHT },
+                        onTestVisionPipeline = { screen = Screen.VISION_TEST },
                     )
-                } else {
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Screen.VISION_TEST -> VisionTestScreen(onBack = { screen = Screen.PREFLIGHT })
+                    Screen.FLIGHT -> Box(modifier = Modifier.fillMaxSize()) {
                         CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
                         TapToSelectOverlay { left, top, right, bottom, w, h ->
-                            // Frame passed to TapToSelectHandler is sourced from
-                            // sdk/VideoFeedRepository's latest frame in the real wiring;
-                            // omitted here since MainActivity should stay a thin composition
-                            // root and not hold frame state itself.
+                            val frame = viewModel.latestFrame.value ?: return@TapToSelectOverlay
+                            viewModel.tapToSelectHandler.onBoxSelected(frame, left, top, right, bottom, w, h)
                             viewModel.onSubjectSelected()
                         }
                         HudOverlay(flightState = flightState, telemetry = telemetry)

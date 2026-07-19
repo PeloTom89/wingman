@@ -61,6 +61,12 @@ search results — extract the real jar from the Gradle cache
 this codebase's signatures were originally verified. It's faster and more reliable than
 another round of web search.
 
-See README.md's "Known gaps" section for what's an intentional placeholder
-(`CoastingBoxTracker`, NV21-to-Bitmap conversion, tap-to-select frame passing, unwired
-`GimbalController`).
+The vision pipeline (`SubjectDetector`/`SubjectTracker`/`TemplateMatchBoxTracker`) has
+gone further than a compile check: it's been run end-to-end on a real device via
+`ui/VisionTestScreen` (phone's own camera via CameraX, no DJI hardware needed — see
+`vision/PhoneCameraFrameSource.kt`), tap-to-select through sustained tracking, 35+ seconds
+with zero crashes. Note MediaPipe runs on **CPU delegate, not GPU** — GPU crashed
+intermittently on-device; see `SubjectDetector.kt`'s header comment before switching it
+back. See README.md's "Known gaps" section for what's still open (`GimbalController`
+unwired, perception units/ring-indexing unverified, DJI camera path itself untested
+pending a connected aircraft).
