@@ -41,6 +41,20 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            // REQUIRED for the DJI SDK to work at all. MSDK V5's SecNeo app-protection
+            // runtime refuses to unpack its real classes in a debuggable process (anti-
+            // tamper): libSdkyclx_clx.so's JNI_OnLoad detects the debuggable flag / attached
+            // JDWP and silently bails -- it never registers the native Helper.i() nor injects
+            // the decrypted DJI classes, so the app dies with VerifyError (if the inert stubs
+            // are packaged) or NoClassDefFoundError (if they aren't) on the first DJI class.
+            // VERIFIED on-device 2026-07-18 (Moto G Play 2026, Android 16): with this the
+            // SecNeo injection completes and the app runs through Application.onCreate + SDK
+            // registration into MainActivity; flipping it back to debuggable reintroduces the
+            // crash while changing nothing else. The tradeoff: this debug variant is not
+            // Java-debuggable (no breakpoints/JDWP). That is inherent -- you cannot run this
+            // SDK under a debugger. Use logging, or a separate throwaway debuggable variant
+            // for non-DJI UI work only.
+            isDebuggable = false
         }
     }
 
@@ -57,6 +71,13 @@ android {
         compose = true
     }
 
+    lint {
+        // A non-debuggable debug build triggers AGP's release-style `lintVital`, which
+        // otherwise aborts the build on pre-existing, unrelated lint findings (e.g. an
+        // androidx Fragment-version advisory). Don't let lint gate packaging here.
+        abortOnError = false
+    }
+
     packaging {
         // DJI's aircraft/networkImp artifacts and several native-heavy transitive deps
         // (video codec, OpenCV/TFLite if added) commonly collide on these; verify the
@@ -68,6 +89,17 @@ android {
             "META-INF/NOTICE",
             "META-INF/NOTICE.txt",
         )
+        // Precautionary, NOT the fix for the launch crash. DJI's aircraft AAR manifest
+        // explicitly declares android:extractNativeLibs="true", but AGP's manifest merger
+        // overrides that to the modern default "false". Setting useLegacyPackaging=true
+        // restores DJI's declared intent (native .so extracted to the on-disk lib dir).
+        // On-device isolation testing (Moto G Play 2026, Android 16, 2026-07-18) showed the
+        // SecNeo class injection succeeds with this either true OR false -- so it is NOT
+        // what unblocks launch (isDebuggable=false is). It's kept because several DJI native
+        // libs are known to load companions by file path at later stages (registration/
+        // flight) that can't be exercised here without a real DJI key + aircraft; honoring
+        // the SDK's own manifest declaration is cheap insurance on those untested paths.
+        jniLibs.useLegacyPackaging = true
     }
 }
 
@@ -85,18 +117,21 @@ dependencies {
     // compiles fine but crashes at runtime with NoClassDefFoundError the moment
     // SDKManager.getInstance() is touched -- confirmed via a real on-device install.
     //
-    // Fixing that scope surfaces a SEPARATE, still-open problem: dji.v5.manager.SDKManager
-    // itself fails ART's bytecode verifier at runtime ("Constructor returning without
-    // calling superclass constructor") on Android 16 (API 36) -- confirmed on a real Moto
-    // G Play 2026 device, reproduced identically across AGP 8.1.4/8.6.0 and MSDK 5.17.0/
-    // 5.18.0, so it isn't a local toolchain or version-pin issue. Matches multiple open,
-    // unresolved reports on DJI's own GitHub (dji-sdk/Mobile-SDK-Android issues #1311 and
-    // #1104, dji-sdk/Mobile-SDK-Android-V5 issue #671) describing the same failure on
-    // recent Android versions. This currently blocks the app from launching at all on
-    // Android 16 devices -- see README's "Known blocking issue" section before assuming
-    // any DJI SDK code in this repo runs. Try an older Android device (12-14) if you have
-    // one; that's the next real diagnostic step, not further Gradle config changes.
-    implementation("com.dji:dji-sdk-v5-aircraft-provided:$djiSdkVersion")
+    // MUST be `compileOnly` (DJI's official V5 sample scope), NOT `implementation`. These
+    // classes (SDKManager, KeyManager, ...) are only compile-time stubs: their shipped
+    // bytecode is deliberately inert (every method starts with a dead leading `return`),
+    // and at runtime the SecNeo protection layer injects the *real* decrypted classes via
+    // `com.cySdkyc.clx.Helper.install()` (called from WingmanApplication.attachBaseContext).
+    // If these stubs are packaged (`implementation`) they land in the app's primary dex and
+    // ART's verifier rejects SDKManager's constructor ("returning without calling superclass
+    // constructor") the instant it's touched -- the crash that blocked launch on Android 16.
+    // With `compileOnly` the stubs compile the app but are never packaged, leaving the
+    // runtime-injected real classes as the only definition. That injection is performed by
+    // the SecNeo native runtime, which REFUSES to run in a debuggable process -- so the
+    // load-bearing other half of this fix is `debug { isDebuggable = false }` in the
+    // android{} block above. Matches the previously unresolved reports on DJI's GitHub
+    // (Mobile-SDK-Android #1311/#1104, -V5 #671), which all reproduce on debug builds.
+    compileOnly("com.dji:dji-sdk-v5-aircraft-provided:$djiSdkVersion")
     implementation("com.dji:dji-sdk-v5-aircraft:$djiSdkVersion")
     runtimeOnly("com.dji:dji-sdk-v5-networkImp:$djiSdkVersion")
 

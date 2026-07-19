@@ -76,61 +76,50 @@ Standard Android Studio project — `Run` on a connected device, or:
 `assembleDebug` and `test` have both been run and pass against the real MSDK V5 5.18.0 jar
 (pulled from Maven Central — no special DJI repository needed, `mavenCentral()` alone
 resolves `com.dji:*`) and the real MediaPipe 0.10.14 jar, not just written from
-documentation. All 28 unit tests pass. It does mean every class name, method signature,
-and package path in the codebase is real, not guessed. It does NOT mean the app runs —
-see the next section, which is currently blocking.
+documentation. All 28 unit tests pass. Beyond that: the app has been installed and
+launched on a real device (Moto G Play 2026, Android 16), and runs through
+`WingmanApplication.onCreate()` and DJI SDK registration setup into `MainActivity` — see
+the next section for the launch-crash history and fix. It still needs the MediaPipe model
+asset (Setup step 5) to get further than `MainActivity`'s `WingmanViewModel` construction,
+and DJI SDK *registration itself* (as opposed to reaching the registration call) hasn't
+been verified yet — that needs a real DJI developer key and hasn't been tested.
 
-## Known blocking issue: crashes on launch on Android 16
+## Resolved: launch crash on Android 16 was a debuggable-build issue, not a DJI SDK bug
 
-Confirmed on a real device (Moto G Play 2026, Android 16 / API 36): the app installs but
-crashes immediately in `WingmanApplication.onCreate()` with:
+Earlier investigation here concluded (wrongly) that DJI's own bytecode was fundamentally
+broken and unfixable — a `VerifyError` in `dji.v5.manager.SDKManager`'s constructor,
+reproduced identically across AGP versions and MSDK point releases, matching several
+unresolved reports on DJI's GitHub tracker. That diagnosis was incomplete.
 
-```
-java.lang.VerifyError: Verifier rejected class dji.v5.manager.SDKManager:
-void dji.v5.manager.SDKManager.<init>() failed to verify: [0x0] Constructor
-returning without calling superclass constructor
-```
+**The real cause:** DJI's MSDK V5 classes are wrapped in a commercial Android
+app-protection/anti-tampering runtime (`com.cySdkyc.clx.Helper`, SecNeo-style). The
+classes as published in `dji-sdk-v5-aircraft-provided` are intentionally-inert compile-time
+stubs — every method's bytecode starts with a dead leading `return`, which is exactly what
+produced the `VerifyError`. The real implementation ships **encrypted inside a native
+library** and is injected into the app's classloader at runtime by `Helper.install()`
+(called from `WingmanApplication.attachBaseContext`) — but that native injection routine
+**refuses to run in a debuggable process** (anti-tamper behavior: it detects the debuggable
+flag / an attached JDWP debugger and silently bails, so the inert stubs are all that's ever
+left resolvable). The fix has two parts, both in `app/build.gradle.kts`:
 
-This is DJI's own compiled bytecode failing ART's verifier, not an app bug — confirmed by
-reproducing it identically across two AGP versions (8.1.4 and 8.6.0) and two MSDK point
-releases (5.17.0 and 5.18.0), which rules out a local toolchain or version-pin cause. It
-matches several open, unresolved reports on DJI's own GitHub tracker describing the same
-failure on recent Android versions:
-[dji-sdk/Mobile-SDK-Android#1311](https://github.com/dji-sdk/Mobile-SDK-Android/issues/1311),
-[dji-sdk/Mobile-SDK-Android#1104](https://github.com/dji-sdk/Mobile-SDK-Android/issues/1104),
-[dji-sdk/Mobile-SDK-Android-V5#671](https://github.com/dji-sdk/Mobile-SDK-Android-V5/issues/671).
-None have a confirmed public fix as of this writing.
+1. `debug { isDebuggable = false }` — the load-bearing fix. Verified on-device (Moto G
+   Play 2026, Android 16): flipping only this flag is the difference between the crash and
+   the app running through `WingmanApplication.onCreate()` + SDK registration into
+   `MainActivity`.
+2. `dji-sdk-v5-aircraft-provided` scoped `compileOnly` (DJI's own official sample scope,
+   not `implementation`) so the inert stubs never get packaged into the app's primary dex
+   in the first place — leaving the runtime-injected real classes as the only definition
+   that ever resolves.
 
-Root cause, best guess: DJI's SDK depends on `org.aspectj:aspectjrt` (bytecode-weaving),
-and D8 warns `Expected stack map table for method with non-linear control flow` while
-dexing the `-provided` jar — consistent with AspectJ-woven bytecode that doesn't carry
-correct StackMapTable frames, which older/more lenient ART verifiers tolerated and newer
-ones (Android 15+) reject outright.
+**Real, permanent tradeoff:** a build that touches the DJI SDK cannot be run under a Java
+debugger (no breakpoints/JDWP) — that's inherent to the protection mechanism, not
+something to work around. Use logging for DJI-touching code; consider a separate
+debuggable build variant if you need breakpoints for pure-UI work that doesn't init the SDK.
 
-**What hasn't worked:** changing AGP version, changing the dexing transform mode
-(`android.useFullClasspathForDexingTransform`), changing the MSDK point version. These
-were all tried and ruled out — don't re-try them without a new reason to think they'd
-behave differently.
-
-**What to try next, in order of how much information it gives you:**
-1. **Test on an older Android device (12–14) if you have access to one.** This is the
-   single most useful next step — if the app runs there, it confirms this is purely an
-   Android-16-vs-DJI's-old-bytecode problem, not something else. DJI's RC-N2 + Mini 4 Pro
-   don't care what Android version the controlling phone runs, so an older phone is a
-   legitimate (if inconvenient) option for development even if Android 16 is what you'd
-   ship to.
-2. **Try DJI's own official sample app** (`dji-sdk/Mobile-SDK-Android-V5`,
-   `SampleCode-V5/android-sdk-v5-sample`) built and installed on this same Moto G. If it
-   crashes identically, that's airtight confirmation this is DJI's bug, not anything in
-   this repo — worth doing before spending more time here.
-3. **File or comment on the existing DJI GitHub issues** with this device's exact repro
-   (Android 16 / API 36, MSDK 5.18.0) — there's no support-ticket alternative visible from
-   DJI's public repo, and an active upstream issue is more likely to get fixed than a
-   silent workaround.
-4. **Bytecode-patch the `-provided` jar** (e.g. with ASM) to fix the missing `super()`
-   call in `SDKManager`'s constructor before packaging — technically feasible given the
-   verifier error names the exact defect, but nontrivial, fragile across DJI SDK updates,
-   and not attempted yet.
+See `app/build.gradle.kts` and `sdk/WingmanApplication.kt`'s header comments for the full
+mechanism. The `#671`/`#1311`/`#1104` DJI GitHub issues referenced during the earlier
+investigation all reproduce on debuggable builds, consistent with this being the actual
+shared root cause across those reports too.
 
 ## Architecture
 

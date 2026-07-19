@@ -1,6 +1,8 @@
 package com.pelotom89.wingman.sdk
 
 import android.app.Application
+import android.content.Context
+import com.cySdkyc.clx.Helper
 import dji.v5.common.error.IDJIError
 import dji.v5.common.register.DJISDKInitEvent
 import dji.v5.manager.SDKManager
@@ -14,15 +16,36 @@ import kotlinx.coroutines.flow.asStateFlow
  * [AircraftConnectionRepository], [PerceptionRepository], [VirtualStickController], etc.
  * is safe to touch until [registrationState] reports [SdkRegistrationState.Registered].
  *
- * NOTE: exact SDKManager/SDKManagerCallback method names are per DJI's documented MSDK V5
- * "Chapter 3: Integrate SDK" registration pattern; verify against the pinned SDK version's
- * API reference (developer.dji.com/api-reference-v5) at first build — this file has not
- * been compiled against the real SDK jar.
+ * CRITICAL, discovered via real on-device debugging (2026-07-18): DJI's MSDK V5 classes
+ * are wrapped by a commercial Android app-protection/obfuscation runtime
+ * (`com.cySdkyc.clx.Helper` — a SecNeo-style tool). The compile-time classes are
+ * intentionally-inert protected stubs (bytecode with a dead leading `return` as the first
+ * instruction of most methods, including constructors); the REAL classes live encrypted in
+ * native libs and are injected into the classloader at runtime by SecNeo's native
+ * `JNI_OnLoad`, triggered by the [Helper.install] call below. That call must run in
+ * [attachBaseContext], NOT [onCreate], because class loading starts before `onCreate()`.
+ *
+ * BUT [Helper.install] is necessary, not sufficient. Two build-side conditions gate it,
+ * both verified on-device (Moto G Play 2026 / Android 16), see app/build.gradle.kts:
+ *   1. The SecNeo native runtime REFUSES to inject in a *debuggable* process (anti-tamper):
+ *      its JNI_OnLoad silently bails, `install()` swallows the resulting error, and every
+ *      DJI class fails to resolve. The debug build must be built `isDebuggable = false`.
+ *      This was the actual blocker behind the long-standing launch crash — install() was
+ *      already being called here and still crashed, purely because the build was debuggable.
+ *   2. `dji-sdk-v5-aircraft-provided` must be `compileOnly` (DJI's official scope) so the
+ *      inert stubs are never packaged into the app's primary dex.
+ * Matches the still-open dji-sdk/Mobile-SDK-Android-V5 issue #671 ("Helper.install()
+ * Failure") and #1311/#1104 — all reported against debuggable builds.
  */
 class WingmanApplication : Application() {
 
     private val _registrationState = MutableStateFlow<SdkRegistrationState>(SdkRegistrationState.NotStarted)
     val registrationStateFlow: StateFlow<SdkRegistrationState> get() = _registrationState.asStateFlow()
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        Helper.install(this)
+    }
 
     override fun onCreate() {
         super.onCreate()

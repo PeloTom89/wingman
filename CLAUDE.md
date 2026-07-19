@@ -22,12 +22,12 @@ Real device only for anything DJI-related — MSDK V5 does not run in the emulat
 USB accessory connection and an aircraft radio link via the RC-N2). A clean compile proves
 the API surface is real; it proves nothing about flight behavior.
 
-**The app currently crashes on launch on Android 16** (confirmed on a real device) — see
-README.md's "Known blocking issue" before spending time on anything downstream of SDK
-registration. This is DJI's own bytecode failing ART's verifier, reproduced across two AGP
-versions and two MSDK point releases, matching multiple unresolved upstream GitHub issues.
-Don't re-try AGP/dexing-mode/SDK-version changes as a fix without a genuinely new reason —
-that space is already ruled out. An older Android device is the next real diagnostic step.
+**The app runs on-device now** (verified on Moto G Play 2026, Android 16) — a launch crash
+that looked like an unfixable DJI bytecode bug turned out to be DJI's app-protection layer
+refusing to inject its real classes into a *debuggable* build. See README.md's "Resolved:
+launch crash on Android 16" for the mechanism. Load-bearing consequence: **DJI-touching
+builds cannot be run under a Java debugger** (`isDebuggable = false` is required) — don't
+"fix" that back to `true` without understanding why it's there.
 
 ## Safety-critical files — treat changes here differently
 
