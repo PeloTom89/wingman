@@ -62,6 +62,11 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     val telemetry = aircraftConnectionRepository.telemetryFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    /** Distinct from [registrationState]'s ProductConnected -- see
+     *  AircraftConnectionRepository.flightControllerConnectedFlow's header comment. */
+    val flightControllerConnected: StateFlow<Boolean> = aircraftConnectionRepository.flightControllerConnectedFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     init {
         viewModelScope.launch {
             flightStateMachine.commandFlow.collect { commandFlowHolder.value = it }

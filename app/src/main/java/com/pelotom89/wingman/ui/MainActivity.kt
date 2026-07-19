@@ -45,12 +45,14 @@ class MainActivity : ComponentActivity() {
                 var screen by remember { mutableStateOf(Screen.PREFLIGHT) }
 
                 val registrationState by viewModel.registrationState.collectAsStateWithLifecycle()
+                val flightControllerConnected by viewModel.flightControllerConnected.collectAsStateWithLifecycle()
                 val flightState by viewModel.flightState.collectAsStateWithLifecycle()
                 val telemetry by viewModel.telemetry.collectAsStateWithLifecycle()
 
                 when (screen) {
                     Screen.PREFLIGHT -> PreflightChecklistScreen(
                         registrationState = registrationState,
+                        flightControllerConnected = flightControllerConnected,
                         hasGpsFix = telemetry != null,
                         onProceed = { screen = Screen.FLIGHT },
                     )

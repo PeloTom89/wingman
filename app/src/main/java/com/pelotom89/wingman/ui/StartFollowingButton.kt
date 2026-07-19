@@ -25,7 +25,15 @@ fun StartFollowingButton(flightState: FlightState, onPressed: () -> Unit, modifi
         modifier = modifier
             .padding(16.dp)
             .size(width = 160.dp, height = 64.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+        // disabledContainerColor/disabledContentColor explicit: the default M3 light-scheme
+        // disabled colors are low-alpha near-black -- invisible over the camera preview
+        // background once following starts and this disables (see
+        // PreflightChecklistScreen.kt's header comment for the same bug found on-device).
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF2E7D32),
+            disabledContainerColor = Color.DarkGray,
+            disabledContentColor = Color.LightGray,
+        ),
     ) {
         Text("START FOLLOWING", color = Color.White)
     }

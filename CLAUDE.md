@@ -19,7 +19,7 @@ status"). `local.properties` is gitignored; you need your own `sdk.dir` and `DJI
 (see README.md's Setup section) to build.
 
 Real device only for anything DJI-related — MSDK V5 does not run in the emulator (needs a
-USB accessory connection and an aircraft radio link via the RC-N2). A clean compile proves
+USB accessory connection and an aircraft radio link via the RC-N3). A clean compile proves
 the API surface is real; it proves nothing about flight behavior.
 
 **The app runs on-device now** (verified on Moto G Play 2026, Android 16) — a launch crash

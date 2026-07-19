@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,24 +34,42 @@ import com.pelotom89.wingman.sdk.SdkRegistrationState
 @Composable
 fun PreflightChecklistScreen(
     registrationState: SdkRegistrationState,
+    flightControllerConnected: Boolean,
     hasGpsFix: Boolean,
     onProceed: () -> Unit,
 ) {
     var vlosAcknowledged by remember { mutableStateOf(false) }
 
+    // Split into two rows deliberately -- VERIFIED on-device (2026-07-19) that these are
+    // genuinely independent: SDKManager's ProductConnected only means the RC-N3 is linked
+    // to the phone over USB, and can be true while the aircraft's flight controller itself
+    // is unconnected (observed: aircraft LEDs flashing red/error, zero FlightController
+    // telemetry, while this app's own registrationState still read ProductConnected). A
+    // single combined checkmark here would have silently lied about the aircraft being
+    // ready. See AircraftConnectionRepository.flightControllerConnectedFlow's header comment.
     val sdkReady = registrationState is SdkRegistrationState.ProductConnected
-    val allReady = sdkReady && hasGpsFix && vlosAcknowledged
+    val allReady = sdkReady && flightControllerConnected && hasGpsFix && vlosAcknowledged
 
+    // Landscape-locked (see MainActivity's screenOrientation) means very little vertical
+    // height to work with -- scrollable so the "Begin flight" button (last item) can never
+    // be silently clipped below the screen on a shorter phone, which is exactly what was
+    // happening with a plain non-scrolling Column here.
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Wingman preflight", style = MaterialTheme.typography.headlineSmall, color = Color.White)
 
-        ChecklistRow("DJI SDK registered & aircraft connected", sdkReady)
+        ChecklistRow("DJI SDK registered, RC-N3 connected", sdkReady)
+        // Raw state, not just the collapsed ready/not-ready dot above -- SdkRegistrationState
+        // has real diagnostic value (Registering vs. Failed(message) vs. Registered-but-not-
+        // yet-ProductConnected) that was previously only visible by pulling logcat.
+        Text("  state: $registrationState", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+        ChecklistRow("Aircraft flight controller connected", flightControllerConnected)
         ChecklistRow("Phone GPS fix acquired", hasGpsFix)
 
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -62,7 +83,19 @@ fun PreflightChecklistScreen(
             )
         }
 
-        Button(onClick = onProceed, enabled = allReady) {
+        // Explicit disabled colors: MaterialTheme here is the unmodified M3 default (no
+        // app-wide dark ColorScheme defined -- see ui/theme), so a disabled Button's
+        // default colors come from a LIGHT scheme's low-alpha onSurface. Against this
+        // screen's hardcoded black background that's indistinguishable from invisible --
+        // this button WAS rendering the whole time, just impossible to see, before this.
+        Button(
+            onClick = onProceed,
+            enabled = allReady,
+            colors = ButtonDefaults.buttonColors(
+                disabledContainerColor = Color.DarkGray,
+                disabledContentColor = Color.LightGray,
+            ),
+        ) {
             Text("Begin flight")
         }
     }

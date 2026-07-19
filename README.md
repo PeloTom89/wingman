@@ -74,7 +74,7 @@ following the rule.
 4. Open the project in Android Studio and let it sync (the Gradle wrapper is committed and
    has been verified against a real build — see "Build status" below).
 5. Real device only. MSDK V5 will not run meaningfully in the emulator (no USB accessory,
-   no aircraft radio link) — you need an actual Android phone connected to an RC-N2, and
+   no aircraft radio link) — you need an actual Android phone connected to an RC-N3, and
    that same phone (carried by the cyclist) is also the GPS source `location/
    SubjectLocationProvider.kt` reads from.
 

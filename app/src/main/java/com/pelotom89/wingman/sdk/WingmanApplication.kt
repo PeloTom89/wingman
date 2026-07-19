@@ -2,6 +2,7 @@ package com.pelotom89.wingman.sdk
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import com.cySdkyc.clx.Helper
 import dji.v5.common.error.IDJIError
 import dji.v5.common.register.DJISDKInitEvent
@@ -10,6 +11,8 @@ import dji.v5.manager.interfaces.SDKManagerCallback
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+
+private const val TAG = "WingmanSDK"
 
 /**
  * SDK registration is the async gate every other DJI call sits behind: nothing in
@@ -54,21 +57,26 @@ class WingmanApplication : Application() {
     }
 
     private fun registerWithDji() {
+        Log.i(TAG, "calling SDKManager.init()")
         _registrationState.value = SdkRegistrationState.Registering
         SDKManager.getInstance().init(this, object : SDKManagerCallback {
             override fun onRegisterSuccess() {
+                Log.i(TAG, "onRegisterSuccess")
                 _registrationState.value = SdkRegistrationState.Registered
             }
 
             override fun onRegisterFailure(error: IDJIError) {
+                Log.w(TAG, "onRegisterFailure: ${error.description()}")
                 _registrationState.value = SdkRegistrationState.Failed(error.description())
             }
 
             override fun onProductConnect(productId: Int) {
+                Log.i(TAG, "onProductConnect: $productId")
                 _registrationState.value = SdkRegistrationState.ProductConnected(productId)
             }
 
             override fun onProductDisconnect(productId: Int) {
+                Log.i(TAG, "onProductDisconnect: $productId")
                 // Registration itself remains valid across a product disconnect (e.g. the
                 // RC/aircraft link drops mid-flight) — only the connection state changes.
                 // AircraftConnectionRepository is the layer that should react to this by
@@ -78,7 +86,20 @@ class WingmanApplication : Application() {
 
             override fun onProductChanged(productId: Int) = Unit
 
-            override fun onInitProcess(event: DJISDKInitEvent, totalProcess: Int) = Unit
+            // init() only performs LOCAL setup -- confirmed via javap against the real
+            // dji-sdk-v5-aircraft-provided-5.18.0.jar: SDKManager has a separate
+            // registerApp() that actually triggers the network App-Key validation
+            // (onRegisterSuccess/onRegisterFailure). Missing this call was the real bug
+            // behind registration hanging at "Registering" forever on real hardware
+            // (2026-07-19) -- init() completes (this callback fires INITIALIZE_COMPLETE)
+            // but nothing ever calls registerApp(), so neither onRegisterSuccess nor
+            // onRegisterFailure had any way to fire.
+            override fun onInitProcess(event: DJISDKInitEvent, totalProcess: Int) {
+                Log.i(TAG, "onInitProcess: $event ($totalProcess)")
+                if (event == DJISDKInitEvent.INITIALIZE_COMPLETE) {
+                    SDKManager.getInstance().registerApp()
+                }
+            }
 
             override fun onDatabaseDownloadProgress(current: Long, total: Long) = Unit
         })

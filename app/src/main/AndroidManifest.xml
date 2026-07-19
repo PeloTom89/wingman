@@ -12,10 +12,16 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
-    <!-- RC-N2 controller pairing / USB accessory link. -->
+    <!-- RC-N3 controller pairing / USB accessory link. The RC-N3 talks to the phone as
+         an Android Open Accessory (AOA) — usb.accessory, not usb.host, is the feature
+         that actually matters (matches DJI's V5 sample manifest; the dji-sdk-v5-aircraft
+         AAR also declares usb.accessory required=true, merged in at build time). -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-feature android:name="android.hardware.usb.host" />
+    <uses-feature
+        android:name="android.hardware.usb.accessory"
+        android:required="true" />
 
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -45,6 +51,28 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <!-- USB-accessory attach handler, mirroring DJI's official V5 sample. Being a
+             registered handler (a) grants Wingman implicit USB-accessory permission when
+             it's chosen on plug-in, with no runtime permission dialog, and (b) breaks
+             DJI Fly's "open by default" monopoly on the RC-N3, which otherwise silently
+             launches DJI Fly on every plug-in and leaves the RC in a state where MSDK
+             apps can't bring the aircraft's flight-controller link up themselves (see
+             UsbAttachActivity's doc comment; DJI V5 repo issue #427).
+             @xml/accessory_filter is NOT a local resource — it ships inside the
+             dji-sdk-v5-aircraft AAR and is resolved from there at build time, exactly
+             as DJI's own sample does (their repo has no local copy either). -->
+        <activity
+            android:name=".ui.UsbAttachActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
+                android:resource="@xml/accessory_filter" />
         </activity>
 
     </application>
