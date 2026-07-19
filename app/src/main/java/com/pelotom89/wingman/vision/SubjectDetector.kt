@@ -53,8 +53,8 @@ class SubjectDetector(context: Context) {
     private companion object {
         // EfficientDet-Lite0, quantized — see plan rationale on why a lightweight,
         // GPU-delegated model at reduced cadence rather than a heavier per-frame model.
-        // Ship this asset in app/src/main/assets/ once downloaded from MediaPipe's model
-        // zoo; not committed as a binary here.
+        // Committed at app/src/main/assets/efficientdet_lite0.tflite (pulled from
+        // storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/).
         const val MODEL_ASSET_PATH = "efficientdet_lite0.tflite"
         const val PERSON_CATEGORY = "person"
         const val MAX_RESULTS = 5

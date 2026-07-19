@@ -56,9 +56,11 @@ following the rule.
    support.
 4. Open the project in Android Studio and let it sync (the Gradle wrapper is committed and
    has been verified against a real build — see "Build status" below).
-5. Download an `efficientdet_lite0.tflite` model (or your preferred MediaPipe-compatible
-   person detector) into `app/src/main/assets/` — not committed as a binary in this repo.
-   See `vision/SubjectDetector.kt`.
+5. The MediaPipe `efficientdet_lite0.tflite` person-detection model is committed at
+   `app/src/main/assets/efficientdet_lite0.tflite` (pulled from
+   `storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/`).
+   Swap it for a different MediaPipe-compatible detector if you want — see
+   `vision/SubjectDetector.kt`.
 6. Real device only. MSDK V5 will not run meaningfully in the emulator (no USB accessory,
    no aircraft radio link) — you need an actual Android phone connected to an RC-N2.
 
@@ -77,12 +79,13 @@ Standard Android Studio project — `Run` on a connected device, or:
 (pulled from Maven Central — no special DJI repository needed, `mavenCentral()` alone
 resolves `com.dji:*`) and the real MediaPipe 0.10.14 jar, not just written from
 documentation. All 28 unit tests pass. Beyond that: the app has been installed and
-launched on a real device (Moto G Play 2026, Android 16), and runs through
-`WingmanApplication.onCreate()` and DJI SDK registration setup into `MainActivity` — see
-the next section for the launch-crash history and fix. It still needs the MediaPipe model
-asset (Setup step 5) to get further than `MainActivity`'s `WingmanViewModel` construction,
-and DJI SDK *registration itself* (as opposed to reaching the registration call) hasn't
-been verified yet — that needs a real DJI developer key and hasn't been tested.
+launched on a real device (Moto G Play 2026, Android 16) and **the UI actually renders** —
+`PreflightChecklistScreen` shows up correctly, including both checklist items correctly
+gated as not-ready (no DJI key/aircraft/GPS in that bench test) and the "Begin flight"
+button correctly disabled. See the next section for the launch-crash history and fix. What
+still hasn't been verified: DJI SDK *registration itself* succeeding (as opposed to
+reaching the registration call, which does work) — that needs a real DJI developer key and
+a connected RC-N2/aircraft, and hasn't been tested yet.
 
 ## Resolved: launch crash on Android 16 was a debuggable-build issue, not a DJI SDK bug
 
