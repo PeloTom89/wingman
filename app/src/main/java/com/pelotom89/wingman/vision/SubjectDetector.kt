@@ -63,11 +63,19 @@ class SubjectDetector(context: Context) {
     fun close() = detector.close()
 
     private companion object {
-        // EfficientDet-Lite0, quantized — see plan rationale on why a lightweight,
-        // GPU-delegated model at reduced cadence rather than a heavier per-frame model.
-        // Committed at app/src/main/assets/efficientdet_lite0.tflite (pulled from
-        // storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/).
-        const val MODEL_ASSET_PATH = "efficientdet_lite0.tflite"
+        // EfficientDet-Lite2 (quantized), not Lite0 -- swapped up after user-reported poor
+        // detection tracking a face at ~1 foot. At that range the face fills most of the
+        // frame, so this wasn't a "too small/distant" problem; more likely Lite0's smaller
+        // capacity generalizing poorly to a tight face-filling-frame crop, which looks
+        // unlike a typical COCO "person" (full/partial body) training example. Lite2 is
+        // DJI/MediaPipe-documented as "more accurate... appropriate for use cases where
+        // accuracy is a greater priority to speed and size" than Lite0. Real cost: ~1.6x
+        // the file size (7.5MB vs 4.6MB) and slower CPU inference (already on CPU, not GPU
+        // -- see the delegate comment above) -- verify on-device FPS is still acceptable
+        // for the tracking loop, not just that detection accuracy improved.
+        // Committed at app/src/main/assets/efficientdet_lite2.tflite (pulled from
+        // storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/int8/1/).
+        const val MODEL_ASSET_PATH = "efficientdet_lite2.tflite"
         const val PERSON_CATEGORY = "person"
         const val MAX_RESULTS = 5
         const val MIN_CONFIDENCE = 0.5f

@@ -56,11 +56,13 @@ following the rule.
    support.
 4. Open the project in Android Studio and let it sync (the Gradle wrapper is committed and
    has been verified against a real build — see "Build status" below).
-5. The MediaPipe `efficientdet_lite0.tflite` person-detection model is committed at
-   `app/src/main/assets/efficientdet_lite0.tflite` (pulled from
-   `storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/`).
-   Swap it for a different MediaPipe-compatible detector if you want — see
-   `vision/SubjectDetector.kt`.
+5. The MediaPipe `efficientdet_lite2.tflite` person-detection model is committed at
+   `app/src/main/assets/efficientdet_lite2.tflite` (pulled from
+   `storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/int8/1/`).
+   Swapped up from Lite0 after user testing found it failed to detect a face filling most
+   of the frame at close range (~1 foot) — Lite2 trades ~1.6x model size and slower CPU
+   inference for better accuracy (see `vision/SubjectDetector.kt`'s header comment). Swap
+   it for a different MediaPipe-compatible detector if you want.
 6. Real device only. MSDK V5 will not run meaningfully in the emulator (no USB accessory,
    no aircraft radio link) — you need an actual Android phone connected to an RC-N2.
 
@@ -216,10 +218,13 @@ prerequisite for testing it safely.
   `TemplateMatchBoxTracker`'s bridging match is now RGB-color-based specifically for this
   (see its header comment — colored gear against comparatively neutral road/grass/sky is
   the intended signal, not skin tone, which was tried and reverted as actively wrong for a
-  geared-up rider), but EfficientDet-Lite0 itself is a small, mobile-optimized model and
-  its accuracy on a small/distant "person" instance is unverified and may simply be worse
-  than what close-up indoor testing has shown — that's a model-capability question, not
-  something the bridging tracker can compensate for. Field-test at realistic range before
+  geared-up rider), and the detector is now EfficientDet-Lite2 (upgraded from Lite0 after
+  it failed to detect a face filling most of the frame at ~1 foot — the fix for that
+  specific close-range case, not distance). Lite2's accuracy on a genuinely small/distant
+  "person" instance at real cycling range is still unverified either way — that's a
+  model-capability question the bridging tracker can't compensate for, and a bigger model
+  isn't automatically a better one for a completely different framing (small-and-far vs.
+  large-and-close). Field-test at realistic range before
   trusting this for anything beyond continued development.
 
 `ReturnToHome`/`EmergencyStop` DO now trigger real aircraft behavior —
