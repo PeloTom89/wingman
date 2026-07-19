@@ -7,7 +7,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import dji.v5.manager.datacenter.MediaDataCenter
-import dji.v5.manager.datacenter.camera.StreamInfo
+import dji.v5.manager.interfaces.ICameraStreamManager
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 
 /**
@@ -15,9 +15,6 @@ import dji.sdk.keyvalue.value.common.ComponentIndexType
  * decode-to-display), separate from sdk/VideoFeedRepository's raw frame listener that
  * feeds the vision pipeline — both read the same underlying stream without forcing a
  * second software decode for display purposes.
- *
- * NOTE: ICameraStreamManager.putCameraStreamSurface shape per DJI's documented MSDK V5
- * pattern; verify against the pinned SDK version's API reference at first build.
  */
 @Composable
 fun CameraPreviewScreen(cameraIndex: ComponentIndexType, modifier: Modifier = Modifier) {
@@ -29,7 +26,7 @@ fun CameraPreviewScreen(cameraIndex: ComponentIndexType, modifier: Modifier = Mo
                     override fun onSurfaceTextureAvailable(surfaceTexture: android.graphics.SurfaceTexture, width: Int, height: Int) {
                         val surface = android.view.Surface(surfaceTexture)
                         MediaDataCenter.getInstance().cameraStreamManager
-                            .putCameraStreamSurface(cameraIndex, surface, width, height, StreamInfo.DEFAULT_STREAM_TYPE.scaleType)
+                            .putCameraStreamSurface(cameraIndex, surface, width, height, ICameraStreamManager.ScaleType.CENTER_INSIDE)
                     }
 
                     override fun onSurfaceTextureSizeChanged(surfaceTexture: android.graphics.SurfaceTexture, width: Int, height: Int) = Unit

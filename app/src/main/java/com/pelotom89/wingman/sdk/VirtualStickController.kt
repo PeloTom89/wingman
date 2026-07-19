@@ -1,10 +1,10 @@
 package com.pelotom89.wingman.sdk
 
-import dji.v5.manager.aircraft.virtualstick.RollPitchControlMode
-import dji.v5.manager.aircraft.virtualstick.VerticalControlMode
-import dji.v5.manager.aircraft.virtualstick.VirtualStickFlightControlParam
+import dji.sdk.keyvalue.value.flightcontroller.RollPitchControlMode
+import dji.sdk.keyvalue.value.flightcontroller.VerticalControlMode
+import dji.sdk.keyvalue.value.flightcontroller.VirtualStickFlightControlParam
+import dji.sdk.keyvalue.value.flightcontroller.YawControlMode
 import dji.v5.manager.aircraft.virtualstick.VirtualStickManager
-import dji.v5.manager.aircraft.virtualstick.YawControlMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay

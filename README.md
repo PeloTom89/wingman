@@ -17,9 +17,15 @@ obstacle avoidance (APAS) is disabled whenever VirtualStick control is active on
 Mini 4 Pro** (unlike the M300/M350/M30 series and Mavic 3E/3M, which keep APAS active
 under VirtualStick — a hardware tradeoff this project deliberately chose not to make, to
 stay on cheaper/lighter consumer hardware). `flightcontrol/ObstacleSafetyClamp.kt` is a
-custom replacement built from raw per-direction distance telemetry
-(`IPerceptionManager`), and it is the single most safety-critical file in this repo. See
-its header comment and `ObstacleSafetyClampTest.kt` before changing it.
+custom replacement built from raw obstacle-distance telemetry (`PerceptionManager` /
+`ObstacleData`), and it is the single most safety-critical file in this repo. The real API
+doesn't give discrete forward/backward/left/right readings — just a ring of horizontal
+distance samples around the aircraft plus separate up/down values — so the clamp samples
+the ring at the aircraft's actual bearing of travel; see `sdk/PerceptionRepository.kt`'s
+header comment for two assumptions (sample units, ring indexing) that are flagged as
+unverified against real hardware and need confirming before the clamp's distances can be
+trusted. Read `ObstacleSafetyClamp.kt`'s header comment and `ObstacleSafetyClampTest.kt`
+before changing either.
 
 **The subject's GPS position, used when vision tracking loses them, comes from this
 phone's own GPS chip** (`location/SubjectLocationProvider.kt`) — the phone stays with the
@@ -48,11 +54,8 @@ following the rule.
    `5.18.0`) against [developer.dji.com/mobile-sdk/downloads](https://developer.dji.com/mobile-sdk/downloads)
    — DJI ships frequent point releases and this needs to stay ≥5.13.0 for Mini 4 Pro
    support.
-4. Open the project in Android Studio and let it sync — this project does not commit a
-   Gradle wrapper jar/scripts (no local Gradle install was available to generate one
-   correctly); Android Studio regenerates `gradlew`/`gradlew.bat`/`gradle-wrapper.jar` on
-   first sync. If you're not using Android Studio, run `gradle wrapper` once with a local
-   Gradle 8.9 install instead.
+4. Open the project in Android Studio and let it sync (the Gradle wrapper is committed and
+   has been verified against a real build — see "Build status" below).
 5. Download an `efficientdet_lite0.tflite` model (or your preferred MediaPipe-compatible
    person detector) into `app/src/main/assets/` — not committed as a binary in this repo.
    See `vision/SubjectDetector.kt`.
@@ -67,6 +70,17 @@ Standard Android Studio project — `Run` on a connected device, or:
 ./gradlew assembleDebug
 ./gradlew test          # unit tests — see "What's actually tested" below
 ```
+
+## Build status
+
+`assembleDebug` and `test` have both been run and pass against the real MSDK V5 5.18.0 jar
+(pulled from Maven Central — no special DJI repository needed, `mavenCentral()` alone
+resolves `com.dji:*`) and the real MediaPipe 0.10.14 jar, not just written from
+documentation. All 28 unit tests pass. This does NOT mean the app works on a real
+aircraft — nothing here has been run against actual hardware, and several DJI API
+assumptions (obstacle-distance units, ring indexing — see the perception note above) are
+explicitly flagged as unverified beyond what a successful compile can prove. It does mean
+every class name, method signature, and package path in the codebase is real, not guessed.
 
 ## Architecture
 
@@ -119,18 +133,23 @@ prerequisite for testing it safely.
   motion between detections) — swap in a real frame-to-frame tracker (OpenCV CSRT/KCF, or
   Lucas-Kanade optical flow) before Milestone 2 testing; coasting will drift badly on
   anything but a near-stationary subject.
-- `sdk/VideoFeedRepository.kt`'s `toBitmapOrNull()` is unimplemented — needs the actual
-  frame `format` MSDK V5 delivers (commonly NV21/YUV420) confirmed before wiring frames
-  into the vision pipeline.
+- `sdk/VideoFeedRepository.kt`'s `toBitmapOrNull()` is unimplemented. The frame format IS
+  now confirmed (NV21, requested explicitly in `addFrameListener`) — what's missing is the
+  actual NV21 -> Bitmap conversion, needed before frames can reach the vision pipeline.
 - `ui/MainActivity.kt`'s tap-to-select callback doesn't yet pass the current video frame
   into `TapToSelectHandler.onBoxSelected` — needs a "latest frame" holder shared between
   `CameraPreviewScreen` and the gesture handler.
-- `FlightStateMachine`'s `ReturnToHome`/`EmergencyStop` states zero the VirtualStick output
-  but don't yet trigger the aircraft's native go-home/land behavior
-  (`FlightController.startGoHome()`/`startLanding()`, intentionally independent of the
-  VirtualStick path) — needed before this is safe to rely on for a real battery/geofence
-  escalation.
-- Every DJI SDK call in `sdk/` and `ui/CameraPreviewScreen.kt` follows the documented MSDK
-  V5 pattern from research but hasn't been compiled against the real SDK jar — expect to
-  need small signature fixes on first build. Each file flags this in its own header
-  comment.
+- Perception data's units and ring-indexing convention are assumptions, not confirmed
+  facts — see `sdk/PerceptionRepository.kt`'s header comment. Log raw `ObstacleData`
+  values against a known real-world distance/direction before trusting
+  `ObstacleSafetyClamp`'s thresholds in flight.
+- `GimbalController.kt` exists but isn't wired into `WingmanViewModel` or the vision
+  pipeline yet — VisualTrack currently re-centers the subject via aircraft yaw/pitch only
+  (`FlightCommandCalculator`), not gimbal movement, even though the gimbal path would be
+  cheaper/faster for small corrections (see that file's header comment).
+
+`ReturnToHome`/`EmergencyStop` DO now trigger real aircraft behavior —
+`sdk/FlightSafetyActionsController.kt` calls the native `KeyStartGoHome`/
+`KeyStartAutoLanding` action keys, wired from `WingmanViewModel` on state-class transition
+(not from `FlightStateMachine` itself, to keep that class testable without an SDK
+dependency).

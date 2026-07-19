@@ -10,6 +10,7 @@ import com.pelotom89.wingman.flightcontrol.LatLon
 import com.pelotom89.wingman.flightcontrol.ManualOverrideGate
 import com.pelotom89.wingman.location.SubjectLocationProvider
 import com.pelotom89.wingman.sdk.AircraftConnectionRepository
+import com.pelotom89.wingman.sdk.FlightSafetyActionsController
 import com.pelotom89.wingman.sdk.PerceptionRepository
 import com.pelotom89.wingman.sdk.SdkRegistrationState
 import com.pelotom89.wingman.sdk.VideoFeedRepository
@@ -23,6 +24,7 @@ import com.pelotom89.wingman.vision.TrackingResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -48,11 +50,12 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     private val virtualStickController = VirtualStickController(commandFlowHolder, overrideActiveHolder)
     private val manualOverrideGate = ManualOverrideGate(virtualStickController)
     private val flightLogger = FlightLogger(application)
+    private val flightSafetyActionsController = FlightSafetyActionsController()
 
     private val flightStateMachine = FlightStateMachine(
         trackingResultFlow = _trackingResultFlow,
         telemetryFlow = aircraftConnectionRepository.telemetryFlow,
-        obstacleReadingsFlow = perceptionRepository.obstacleReadingsFlow,
+        obstacleSnapshotFlow = perceptionRepository.obstacleSnapshotFlow,
         locationFixFlow = subjectLocationProvider.fixFlow, // Flow<out T> covariance: LocationFix satisfies LocationFix?
         manualOverrideActiveFlow = manualOverrideGate.activeFlow,
     )
@@ -67,6 +70,19 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     init {
         viewModelScope.launch {
             flightStateMachine.commandFlow.collect { commandFlowHolder.value = it }
+        }
+        // Fires once per transition INTO a new state class (distinctUntilChangedBy keys
+        // on the class, not full equality) -- ReturnToHome/EmergencyStop carry a `reason`
+        // string that can change tick-to-tick (e.g. battery percent counting down), which
+        // would otherwise re-trigger the native action on every tick under plain equality.
+        viewModelScope.launch {
+            flightState.distinctUntilChangedBy { it::class }.collect { state ->
+                when (state) {
+                    is FlightState.ReturnToHome -> flightSafetyActionsController.startGoHome()
+                    is FlightState.EmergencyStop -> flightSafetyActionsController.startAutoLanding()
+                    else -> Unit
+                }
+            }
         }
         flightStateMachine.start(viewModelScope)
         virtualStickController.start(viewModelScope)

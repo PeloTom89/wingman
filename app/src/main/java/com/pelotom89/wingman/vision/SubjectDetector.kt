@@ -3,6 +3,7 @@ package com.pelotom89.wingman.vision
 import android.content.Context
 import android.graphics.Bitmap
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector.ObjectDetectorOptions
@@ -21,7 +22,7 @@ class SubjectDetector(context: Context) {
             .setBaseOptions(
                 BaseOptions.builder()
                     .setModelAssetPath(MODEL_ASSET_PATH)
-                    .setDelegate(BaseOptions.Delegate.GPU)
+                    .setDelegate(Delegate.GPU)
                     .build(),
             )
             .setRunningMode(RunningMode.IMAGE)

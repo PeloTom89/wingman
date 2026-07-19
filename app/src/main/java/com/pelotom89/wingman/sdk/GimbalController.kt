@@ -1,7 +1,11 @@
 package com.pelotom89.wingman.sdk
 
+import dji.sdk.keyvalue.key.GimbalKey
+import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
-import dji.v5.manager.aircraft.gimbal.GimbalManager
+import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotationMode
+import dji.sdk.keyvalue.value.gimbal.GimbalResetType
+import dji.v5.manager.KeyManager
 
 /**
  * Gimbal pitch/yaw is the first, cheapest way to re-center a subject in frame — cheaper
@@ -10,25 +14,32 @@ import dji.v5.manager.aircraft.gimbal.GimbalManager
  * the subject is leaving the gimbal's own range of motion or the aircraft needs to close
  * distance, not just re-center.
  *
- * NOTE: GimbalManager/GimbalAngleRotation shape per DJI's documented MSDK V5 pattern;
- * verify against the pinned SDK version's API reference at first build.
+ * CORRECTED against the real MSDK V5 jar: there is no discrete GimbalManager class at all
+ * — gimbal control is entirely key-based (`GimbalKey.KeyRotateByAngle` /
+ * `GimbalKey.KeyGimbalReset`, driven through the same `KeyManager.performAction` used for
+ * other action-style commands), unlike VirtualStick/Perception which do have dedicated
+ * manager singletons.
  */
-class GimbalController(private val gimbalIndex: dji.sdk.keyvalue.value.common.ComponentIndexType) {
+class GimbalController {
 
     fun rotateTo(pitchDegrees: Double, yawDegrees: Double) {
-        val rotation = GimbalAngleRotation().apply {
-            pitch = pitchDegrees
-            yaw = yawDegrees
-            pitchIgnored = false
-            yawIgnored = false
-            rollIgnored = true
-            duration = GIMBAL_MOVE_DURATION_SECONDS
-        }
-        GimbalManager.getInstance().rotateByAngle(gimbalIndex, rotation, null)
+        val rotation = GimbalAngleRotation(
+            /* mode = */ GimbalAngleRotationMode.ABSOLUTE_ANGLE,
+            /* pitch = */ pitchDegrees,
+            /* roll = */ 0.0,
+            /* yaw = */ yawDegrees,
+            /* pitchIgnored = */ false,
+            /* rollIgnored = */ true,
+            /* yawIgnored = */ false,
+            /* duration = */ GIMBAL_MOVE_DURATION_SECONDS,
+            /* jointReferenceUsed = */ false,
+            /* timeout = */ null,
+        )
+        KeyManager.getInstance().performAction(KeyTools.createKey(GimbalKey.KeyRotateByAngle), rotation, null)
     }
 
     fun recenter() {
-        GimbalManager.getInstance().reset(gimbalIndex, null)
+        KeyManager.getInstance().performAction(KeyTools.createKey(GimbalKey.KeyGimbalReset), GimbalResetType.RECENTER, null)
     }
 
     private companion object {

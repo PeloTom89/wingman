@@ -2,7 +2,6 @@ package com.pelotom89.wingman.sdk
 
 import android.graphics.Bitmap
 import dji.v5.manager.datacenter.MediaDataCenter
-import dji.v5.manager.datacenter.camera.StreamInfo
 import dji.v5.manager.interfaces.ICameraStreamManager
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.BufferOverflow
@@ -19,16 +18,19 @@ import kotlinx.coroutines.flow.buffer
  * Buffers only the latest frame (BufferOverflow.DROP_OLDEST): if vision inference or the
  * UI falls behind, we want the freshest frame next tick, not a backlog of stale ones.
  *
- * NOTE: ICameraStreamManager/MediaDataCenter shape per DJI's documented MSDK V5 camera
- * stream pattern; verify against the pinned SDK version's API reference at first build.
+ * CORRECTED against the real MSDK V5 jar: `addFrameListener` takes a single
+ * `FrameFormat` (not a `StreamInfo` — that class is unrelated metadata, not used by this
+ * call at all), and `CameraFrameListener.onFrame` is a 6-arg callback
+ * (data, offset, length, width, height, format).
  */
 class VideoFeedRepository(private val cameraIndex: dji.sdk.keyvalue.value.common.ComponentIndexType) {
 
     val frameFlow: Flow<VideoFrame> = callbackFlow {
-        val listener = ICameraStreamManager.CameraFrameListener { frameData, offset, length, width, height, format, _ ->
+        val listener = ICameraStreamManager.CameraFrameListener { frameData, offset, length, width, height, format ->
             trySend(VideoFrame(frameData, offset, length, width, height, format))
         }
-        MediaDataCenter.getInstance().cameraStreamManager.addFrameListener(cameraIndex, StreamInfo.DEFAULT_STREAM_TYPE, listener)
+        MediaDataCenter.getInstance().cameraStreamManager
+            .addFrameListener(cameraIndex, ICameraStreamManager.FrameFormat.NV21, listener)
         awaitClose {
             MediaDataCenter.getInstance().cameraStreamManager.removeFrameListener(listener)
         }
@@ -43,12 +45,13 @@ data class VideoFrame(
     val length: Int,
     val widthPx: Int,
     val heightPx: Int,
-    val format: Int,
+    val format: ICameraStreamManager.FrameFormat,
 )
 
 fun VideoFrame.toBitmapOrNull(): Bitmap? {
-    // Placeholder conversion point: the real implementation depends on which `format`
-    // MSDK V5 actually delivers (commonly NV21/YUV420) — wire through android.graphics.YuvImage
-    // or a GPU-backed converter once the pinned SDK version's frame format is confirmed.
+    // NV21 requested explicitly above (see addFrameListener call), so this should always
+    // be android.graphics.YuvImage-convertible via NV21 -> JPEG -> Bitmap, or a direct
+    // RenderScript/GPU YUV->RGB conversion for lower latency. Not yet implemented — see
+    // README's known gaps; wire this before vision/SubjectDetector.kt can consume frames.
     return null
 }

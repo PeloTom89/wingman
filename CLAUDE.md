@@ -13,13 +13,14 @@ dependency on them** and shouldn't grow one — different language/runtime entir
 
 ## Build/run
 
-No Gradle wrapper is committed (no local Gradle install was available at scaffold time to
-generate `gradlew`/`gradlew.bat`/`gradle-wrapper.jar` correctly) — open in Android Studio
-and let it sync to regenerate the wrapper, or run `gradle wrapper` once with a local
-Gradle 8.9+ install. `./gradlew test` runs the unit tests once the wrapper exists.
+The Gradle wrapper is committed and works (`./gradlew assembleDebug` / `./gradlew test`
+have both been run against the real MSDK V5 5.18.0 + MediaPipe 0.10.14 jars and pass — see
+README.md's "Build status"). `local.properties` is gitignored; you need your own
+`sdk.dir` and `DJI_API_KEY` (see README.md's Setup section) to build.
 
 Real device only for anything DJI-related — MSDK V5 does not run in the emulator (needs a
-USB accessory connection and an aircraft radio link via the RC-N2).
+USB accessory connection and an aircraft radio link via the RC-N2). A clean compile proves
+the API surface is real; it proves nothing about flight behavior.
 
 ## Safety-critical files — treat changes here differently
 
@@ -35,15 +36,24 @@ USB accessory connection and an aircraft radio link via the RC-N2).
   that's a sign the architecture is being routed around rather than through — reconsider
   before adding one.
 
-## Known state: this is unverified against the real SDK
+## Known state: compiles and passes tests against the real SDK, unverified against real hardware
 
-Every DJI SDK call (in `sdk/` and `ui/CameraPreviewScreen.kt`) was written from
-documented MSDK V5 patterns researched via DJI's API reference, GitHub samples, and SDK
-forum — none of it has been compiled against the real SDK jar yet. Expect first-build
-signature mismatches; each such file has a header comment flagging this. Fix signatures
-against the pinned version's actual API reference (`developer.dji.com/api-reference-v5`)
-rather than guessing further from search results.
+Every DJI/MediaPipe API call in this codebase has been checked against the actual jars
+(via `javap` against the cached Gradle dependencies, not just docs/search results) and the
+full app compiles, assembles, and passes its unit tests. That's a much stronger bar than
+"written from documentation" — but it's still not the same as flying it. Two things remain
+genuinely unverified because they can't be checked from bytecode alone: perception data
+units and ring-indexing convention (`sdk/PerceptionRepository.kt`'s header comment) — both
+feed `ObstacleSafetyClamp` directly, so confirm them against real sensor output before
+trusting that file's thresholds in flight.
+
+If you touch any DJI/MediaPipe call and aren't sure of a signature, don't guess from
+search results — extract the real jar from the Gradle cache
+(`~/.gradle/caches/modules-2/files-2.1/com.dji/...` /
+`.../com.google.mediapipe/...`) and run `javap -public -classpath <jar> <class>` the way
+this codebase's signatures were originally verified. It's faster and more reliable than
+another round of web search.
 
 See README.md's "Known gaps" section for what's an intentional placeholder
-(`CoastingBoxTracker`, unwired video-frame format conversion, tap-to-select frame passing,
-native RTH trigger) vs. what's expected-but-unverified SDK glue.
+(`CoastingBoxTracker`, NV21-to-Bitmap conversion, tap-to-select frame passing, unwired
+`GimbalController`).

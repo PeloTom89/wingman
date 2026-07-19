@@ -2,7 +2,7 @@ package com.pelotom89.wingman.flightcontrol
 
 import com.pelotom89.wingman.location.LocationFix
 import com.pelotom89.wingman.sdk.AircraftTelemetry
-import com.pelotom89.wingman.sdk.ObstacleReading
+import com.pelotom89.wingman.sdk.ObstacleSnapshot
 import com.pelotom89.wingman.sdk.VirtualStickCommand
 import com.pelotom89.wingman.vision.TrackingResult
 import kotlinx.coroutines.CoroutineScope
@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 class FlightStateMachine(
     private val trackingResultFlow: Flow<TrackingResult>,
     private val telemetryFlow: Flow<AircraftTelemetry>,
-    private val obstacleReadingsFlow: Flow<List<ObstacleReading>>,
+    private val obstacleSnapshotFlow: Flow<ObstacleSnapshot>,
     private val locationFixFlow: Flow<LocationFix?>,
     private val manualOverrideActiveFlow: Flow<Boolean>,
     private val safetyLimits: SafetyLimits = SafetyLimits(),
@@ -59,7 +59,7 @@ class FlightStateMachine(
             combine(
                 trackingResultFlow,
                 telemetryFlow,
-                obstacleReadingsFlow,
+                obstacleSnapshotFlow,
                 locationFixFlow,
                 manualOverrideActiveFlow,
             ) { tracking, telemetry, obstacles, locationFix, overrideActive ->
@@ -150,7 +150,7 @@ class FlightStateMachine(
     private data class Tick(
         val tracking: TrackingResult,
         val telemetry: AircraftTelemetry,
-        val obstacles: List<ObstacleReading>,
+        val obstacles: ObstacleSnapshot,
         val locationFix: LocationFix?,
         val overrideActive: Boolean,
     )
