@@ -19,6 +19,11 @@ import kotlin.math.hypot
  * while, that proximity constraint is dropped entirely (confirmed on-device it otherwise
  * blocks re-acquisition forever if the subject leaves frame and returns anywhere other
  * than exactly where they were last seen).
+ *
+ * Tracked box size is fixed at whatever [seed] was called with, for the whole session — a
+ * fresh detection's center repositions the box, but never its width/height (see the size
+ * comment in [onFrame]'s detector-match branch). Confirmed on-device that adopting a raw
+ * detection's own size caused a visible, unwanted resize mid-track.
  */
 class SubjectTracker(
     private val detector: SubjectDetector,
@@ -58,8 +63,19 @@ class SubjectTracker(
                 matchDetectionToPreviousBox(detections, previousBox)
             }
             if (matched != null) {
-                boxTracker.init(frame, matched.box) // re-anchor the bridge tracker on fresh detection
-                matched.box
+                // Keep the box's EXISTING width/height, only take the detection's center —
+                // MediaPipe's "person" category covers head/shoulders/torso, not just a
+                // face, so adopting a fresh detection's raw box size mid-track caused a
+                // visible, unwanted resize the moment a detection (especially in relaxed
+                // re-acquisition mode, which has no size constraint at all) matched
+                // anything other than an identically-framed box. Confirmed on-device.
+                // Matches TemplateMatchBoxTracker's own "position, not scale" philosophy
+                // for bridging frames, so detector re-anchoring and bridging now behave
+                // consistently: the box holds the size the user actually drew for the
+                // whole session, not whatever shape the detector happens to return.
+                val recentered = previousBox.copy(centerX = matched.box.centerX, centerY = matched.box.centerY)
+                boxTracker.init(frame, recentered) // re-anchor the bridge tracker on fresh detection
+                recentered
             } else {
                 boxTracker.update(frame) // detector found nobody matching; fall back to the bridge
             }
