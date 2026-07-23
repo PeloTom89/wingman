@@ -39,6 +39,7 @@ fun PreflightChecklistScreen(
     aircraftLinkStalled: Boolean,
     hasGpsFix: Boolean,
     onProceed: () -> Unit,
+    onTestVideo: () -> Unit,
 ) {
     var vlosAcknowledged by remember { mutableStateOf(false) }
 
@@ -129,6 +130,17 @@ fun PreflightChecklistScreen(
             ),
         ) {
             Text("Begin flight")
+        }
+
+        // Diagnostic (always enabled, no connection gate): opens the aircraft camera feed
+        // directly. If video shows, the aircraft link is genuinely up and the checklist's
+        // FlightControllerKey.KeyConnection gate above is the unreliable signal, not the
+        // connection. See MainActivity's VIDEO_TEST branch.
+        Button(
+            onClick = onTestVideo,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0)),
+        ) {
+            Text("Test video feed (bypass connection gate)")
         }
     }
 }

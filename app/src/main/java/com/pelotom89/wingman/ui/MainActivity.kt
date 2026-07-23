@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -18,25 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 
-/**
- * CameraPreviewScreen is composed unconditionally behind BOTH [Screen]s, not just
- * [Screen.FLIGHT] -- see CameraPreviewScreen's header comment. Decompiling Dronelink,
- * Litchi Pilot, and Maven EVO (2026-07-22, all three confirmed reliably reaching
- * FlightControllerKey.KeyConnection where Wingman was stalling on the same aircraft/RC-N3)
- * found all three bind ICameraStreamManager.putCameraStreamSurface unconditionally, as
- * soon as their video surface exists -- never gated behind any FlightController connection
- * check. Wingman previously only ever reached CameraPreviewScreen (nested inside
- * Screen.FLIGHT) AFTER flightControllerConnected was already true, since
- * PreflightChecklistScreen's "Begin flight" button that switches to Screen.FLIGHT is
- * itself disabled until flightControllerConnected is true -- a structural chicken-and-egg
- * that meant Wingman never got a chance to test whether requesting the video stream early
- * helps establish the aircraft link, unlike every working competitor. Composing it behind
- * the checklist (invisible under its opaque black background, but still attached to the
- * window and laid out, so its TextureView still gets a real Surface and still calls
- * putCameraStreamSurface) removes that gate without weakening the "Begin flight" gate
- * itself, which still requires flightControllerConnected.
- */
-private enum class Screen { PREFLIGHT, FLIGHT }
+private enum class Screen { PREFLIGHT, FLIGHT, VIDEO_TEST }
 
 class MainActivity : ComponentActivity() {
 
@@ -70,12 +53,6 @@ class MainActivity : ComponentActivity() {
                 val telemetry by viewModel.telemetry.collectAsStateWithLifecycle()
 
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Composed unconditionally, behind both screens -- see this file's
-                    // header comment. On PREFLIGHT this sits under PreflightChecklistScreen's
-                    // opaque black background (invisible, but still attached/laid out, so
-                    // putCameraStreamSurface still fires as early as possible).
-                    CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
-
                     when (screen) {
                         Screen.PREFLIGHT -> PreflightChecklistScreen(
                             registrationState = registrationState,
@@ -84,8 +61,35 @@ class MainActivity : ComponentActivity() {
                             aircraftLinkStalled = aircraftLinkStalled,
                             hasGpsFix = telemetry != null,
                             onProceed = { screen = Screen.FLIGHT },
+                            onTestVideo = { screen = Screen.VIDEO_TEST },
                         )
+                        // Diagnostic: show the aircraft camera feed with NO connection gate.
+                        // If video appears here, the aircraft link is genuinely working and
+                        // FlightControllerKey.KeyConnection (what the checklist gates on) is
+                        // just an unreliable signal -- meaning the "not connected" state is a
+                        // gating bug, not a real connection failure. Tap anywhere to go back.
+                        Screen.VIDEO_TEST -> Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable { screen = Screen.PREFLIGHT },
+                        ) {
+                            CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
+                            HudOverlay(flightState = flightState, telemetry = telemetry)
+                        }
                         Screen.FLIGHT -> {
+                            // CameraPreviewScreen is composed ONLY here, on the flight screen,
+                            // which is unreachable until flightControllerConnected (the "Begin
+                            // flight" gate). This is deliberate (reverted an earlier attempt to
+                            // compose it behind both screens): requesting the aircraft camera
+                            // stream (enableStream / putCameraStreamSurface) BEFORE the aircraft
+                            // is connected is the third pre-connection aircraft request Wingman
+                            // was uniquely making (alongside VirtualStick and gimbal, both now
+                            // gated) that no working competitor makes until after connection --
+                            // Litchi's own code waits for onAvailableCameraUpdated. Sending it
+                            // during the handshake window competes with / disrupts the RC<->
+                            // aircraft link and leaves the FlightController handlers only
+                            // partially registered (serial reads, but zero telemetry/KeyConnection).
+                            CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
                             HudOverlay(flightState = flightState, telemetry = telemetry)
                             StartFollowingButton(
                                 flightState = flightState,

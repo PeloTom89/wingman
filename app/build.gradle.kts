@@ -108,7 +108,19 @@ dependencies {
     // Pin to a concrete release ≥ 5.13.0 (first version with Mini 4 Pro support).
     // Verify the current version at https://developer.dji.com/mobile-sdk/downloads
     // before first build — DJI ships frequent point releases and this number will drift.
-    val djiSdkVersion = "5.18.0"
+    //
+    // PINNED TO 5.17.0 (NOT the newer 5.18.0), 2026-07-22, deliberately: three third-party
+    // MSDK V5 apps that connect to the Mini 4 Pro + RC-N3 RELIABLY on the exact hardware
+    // where Wingman-on-5.18.0 stalled (Dronelink, Litchi Pilot, Maven EVO) all ship the
+    // 5.17.0 native SDK -- confirmed by byte-exact match of `libdjisdk_jni.so`
+    // (68,197,840 bytes) between their pulled APKs and the 5.17.0 aircraft AAR; 5.18.0's
+    // libdjisdk_jni.so is a different size (61,440,392). The 5.18.0 aircraft-side
+    // connection stall (KeyManager requests to FlightControllerKey returning
+    // REQUEST_HANDLER_NOT_FOUND even after onProductConnect; DJI issues #427/#442) is
+    // strongly suspected to be a 5.18.0 regression that 5.17.0 predates. If bumping this,
+    // re-verify Mini 4 Pro connection reliability on real hardware first, and check whether
+    // the competitor apps have moved to the newer version too.
+    val djiSdkVersion = "5.17.0"
     // "-provided" is NOT Gradle `compileOnly` scope despite the name suggesting it -- it's
     // where DJI actually puts the real Java/Kotlin classes (SDKManager, KeyManager,
     // VirtualStickManager, PerceptionManager, etc; confirmed via `javap` against the real

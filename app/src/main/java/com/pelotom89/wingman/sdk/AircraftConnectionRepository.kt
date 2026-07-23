@@ -120,20 +120,29 @@ class AircraftConnectionRepository {
      * silently waiting on a listener that never fires.
      */
     fun probeFlightControllerLink() {
-        val key = KeyTools.createKey(FlightControllerKey.KeySerialNumber)
+        // TEMP diagnostic (2026-07-22): video streams fine but KeyManager.listen() delivers
+        // ZERO telemetry updates. Testing whether async getValue (which works for the serial)
+        // can read the telemetry the app actually needs (location/altitude/heading/battery),
+        // which would mean the fix is to POLL getValue instead of relying on listen().
+        probeGetValue("KeySerialNumber", FlightControllerKey.KeySerialNumber)
+        probeGetValue("KeyConnection", FlightControllerKey.KeyConnection)
+        probeGetValue("KeyAircraftLocation", FlightControllerKey.KeyAircraftLocation)
+        probeGetValue("KeyAltitude", FlightControllerKey.KeyAltitude)
+        probeGetValue("KeyCompassHeading", FlightControllerKey.KeyCompassHeading)
+        probeGetValue("KeyIsFlying", FlightControllerKey.KeyIsFlying)
+        probeGetValue("BatteryChargeRemaining", BatteryKey.KeyChargeRemainingInPercent)
+    }
+
+    private fun <T> probeGetValue(label: String, keyInfo: DJIKeyInfo<T>) {
         KeyManager.getInstance().getValue(
-            key,
-            object : CommonCallbacks.CompletionCallbackWithParam<String> {
-                override fun onSuccess(value: String?) {
-                    Log.i(TAG, "FC link probe (KeySerialNumber) success: $value")
+            KeyTools.createKey(keyInfo),
+            object : CommonCallbacks.CompletionCallbackWithParam<T> {
+                override fun onSuccess(value: T?) {
+                    Log.i(TAG, "PROBE $label success: $value")
                 }
 
                 override fun onFailure(error: IDJIError) {
-                    Log.w(
-                        TAG,
-                        "FC link probe (KeySerialNumber) failure: ${error.description()} " +
-                            "(errorType=${error.errorType()}, errorCode=${error.errorCode()}, innerCode=${error.innerCode()})",
-                    )
+                    Log.w(TAG, "PROBE $label FAIL: code=${error.errorCode()} inner=${error.innerCode()}")
                 }
             },
         )

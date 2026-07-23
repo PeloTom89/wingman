@@ -126,9 +126,18 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         // Gimbal aiming is independent of the VirtualStick command path entirely -- see
         // FlightCommandCalculator's header comment on why the aircraft yaws to face the
         // subject while the gimbal only ever pitches (no gimbal yaw needed or used).
+        // GATED ON Following (2026-07-22): only actuate the gimbal once autonomous flight is
+        // actively started -- NEVER before. gimbalPitchDegreesFlow's initial value (0.0)
+        // would otherwise fire gimbalController.rotateTo(0.0, 0.0) (a GimbalKey.KeyRotateByAngle
+        // performAction) at app launch, before the aircraft is connected. Same root-cause
+        // class as the VirtualStick fix: sending ANY aircraft actuation command before/during
+        // the connection handshake appears to disrupt it (aircraft LEDs going to error state
+        // while Wingman runs, where competitor apps that send nothing pre-flight connect fine).
         viewModelScope.launch {
             flightStateMachine.gimbalPitchDegreesFlow.collect { pitchDegrees ->
-                gimbalController.rotateTo(pitchDegrees, 0.0)
+                if (flightStateMachine.flightStateFlow.value is FlightState.Following) {
+                    gimbalController.rotateTo(pitchDegrees, 0.0)
+                }
             }
         }
         // Fires once per transition INTO a new state class (distinctUntilChangedBy keys
@@ -164,7 +173,21 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         flightStateMachine.start(viewModelScope)
-        virtualStickController.start(viewModelScope)
+        // NOTE: virtualStickController.start() is deliberately NOT called here anymore.
+        // ROOT CAUSE of the connection failure (found 2026-07-22): starting it at app
+        // launch immediately calls VirtualStickManager.enableVirtualStick() and then sends
+        // sendVirtualStickAdvancedParam() at 10Hz -- a continuous stream of outbound
+        // flight-control commands over the phone<->RC USB data channel, BEFORE the aircraft
+        // is even connected. No working competitor app (Litchi/Dronelink/Maven/DJI Fly)
+        // touches VirtualStick until an autonomous flight is actively started; verified
+        // Wingman's DJI setup is otherwise byte-identical to Maven's (same 5.17.0 native
+        // SDK, same SecNeo init, same capability assets), yet those apps connect reliably
+        // on the exact hardware where Wingman stalled. The 10Hz command spam appears to
+        // saturate/monopolize the RC data channel so the SDK's own connection-handshake
+        // requests time out (REMOTECONTROLLER REQUEST_TIMEOUT, RC "key channel not
+        // responding", FLIGHTCONTROLLER REQUEST_HANDLER_NOT_FOUND). VirtualStick is now
+        // started only when the operator presses Start Following (see
+        // onStartFollowingPressed) -- flight control is meaningless before that anyway.
     }
 
     fun onManualOverridePressed() {
@@ -181,6 +204,11 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         flightStateMachine.armLaunchPoint(
             telemetry.value?.let { LatLon(it.latitude, it.longitude) } ?: return,
         )
+        // Enable VirtualStick + begin the 10Hz command loop ONLY now, when the operator is
+        // actively starting autonomous flight -- never before (see the note in init on why
+        // starting it at launch broke the connection). The button that calls this is gated
+        // on FlightState.Idle, so this fires once per flight.
+        virtualStickController.start(viewModelScope)
         flightStateMachine.startFollowing()
     }
 
