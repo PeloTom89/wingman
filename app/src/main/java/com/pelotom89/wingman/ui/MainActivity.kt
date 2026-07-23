@@ -6,10 +6,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,13 +71,20 @@ class MainActivity : ComponentActivity() {
                         // FlightControllerKey.KeyConnection (what the checklist gates on) is
                         // just an unreliable signal -- meaning the "not connected" state is a
                         // gating bug, not a real connection failure. Tap anywhere to go back.
-                        Screen.VIDEO_TEST -> Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clickable { screen = Screen.PREFLIGHT },
-                        ) {
+                        Screen.VIDEO_TEST -> Box(modifier = Modifier.fillMaxSize()) {
                             CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
                             HudOverlay(flightState = flightState, telemetry = telemetry)
+                            Button(
+                                onClick = { screen = Screen.PREFLIGHT },
+                                modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
+                            ) { Text("Back") }
+                            // Indoor command-path test: moves the gimbal (visible in the feed)
+                            // to prove aircraft COMMANDS reach the drone, independent of the
+                            // telemetry getValue path. See WingmanViewModel.onTestGimbalPressed.
+                            Button(
+                                onClick = { viewModel.onTestGimbalPressed() },
+                                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                            ) { Text("Test gimbal (tilt camera)") }
                         }
                         Screen.FLIGHT -> {
                             // CameraPreviewScreen is composed ONLY here, on the flight screen,

@@ -153,25 +153,6 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }
-        // Bounded active retry while the FC link is down post-ProductConnect: a read-only
-        // probe request down the FC key channel every few seconds (collectLatest cancels
-        // the loop the moment the link comes up or the product disconnects). This is the
-        // strongest retry MSDK V5's public surface allows -- there is no reconnect API,
-        // and DJI's own sample has no equivalent loop (it just waits, and exhibits the
-        // same intermittent stall; see AircraftConnectionRepository's header for the
-        // issue-#427 evidence). The probe's real value is making each attempt's concrete
-        // native error visible in logcat; aircraftLinkStalled is what tells the operator
-        // to stop waiting and act.
-        viewModelScope.launch {
-            awaitingFlightController.collectLatest { awaiting ->
-                if (awaiting) {
-                    repeat(FC_PROBE_MAX_ATTEMPTS) {
-                        aircraftConnectionRepository.probeFlightControllerLink()
-                        delay(FC_PROBE_INTERVAL_MS)
-                    }
-                }
-            }
-        }
         flightStateMachine.start(viewModelScope)
         // NOTE: virtualStickController.start() is deliberately NOT called here anymore.
         // ROOT CAUSE of the connection failure (found 2026-07-22): starting it at app
@@ -188,6 +169,19 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         // responding", FLIGHTCONTROLLER REQUEST_HANDLER_NOT_FOUND). VirtualStick is now
         // started only when the operator presses Start Following (see
         // onStartFollowingPressed) -- flight control is meaningless before that anyway.
+    }
+
+    /** Indoor command-path test: toggles the gimbal pitch between level and pointed down so
+     *  the operator can see (in the live camera feed) whether aircraft COMMANDS actually
+     *  reach the drone -- distinct from telemetry (getValue) reads. Uses the gimbal because
+     *  it's visible and safe with no flight. */
+    private var testGimbalDown = false
+
+    fun onTestGimbalPressed() {
+        testGimbalDown = !testGimbalDown
+        val pitch = if (testGimbalDown) -45.0 else 0.0
+        Log.i("WingmanUI", "onTestGimbalPressed -> gimbal pitch=$pitch")
+        gimbalController.rotateTo(pitch, 0.0)
     }
 
     fun onManualOverridePressed() {
