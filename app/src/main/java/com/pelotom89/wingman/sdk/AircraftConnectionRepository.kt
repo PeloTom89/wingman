@@ -5,9 +5,11 @@ import dji.sdk.keyvalue.key.BatteryKey
 import dji.sdk.keyvalue.key.DJIKeyInfo
 import dji.sdk.keyvalue.key.FlightControllerKey
 import dji.sdk.keyvalue.key.KeyTools
+import dji.sdk.keyvalue.key.RemoteControllerKey
 import dji.sdk.keyvalue.value.common.LocationCoordinate2D
 import dji.sdk.keyvalue.value.common.Velocity3D
 import dji.v5.common.callback.CommonCallbacks
+import dji.v5.common.error.IDJIError
 import dji.v5.manager.KeyManager
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -39,6 +41,21 @@ private const val TAG = "WingmanTelemetry"
  * flashing green) and stayed up when control switched back to this app. If FlightController
  * telemetry stays null with a genuinely GPS-visible aircraft, check `KeyConnection` before
  * assuming a code bug -- it may mean no app has an active claim on the aircraft link yet.
+ *
+ * ON THE INTERMITTENCE (investigated 2026-07-19, full dji-sdk/Mobile-SDK-Android-V5 issue
+ * #427 thread + real-jar disassembly + DJI's own sample source): there is NO app-side API
+ * that forces the RC->aircraft link up. DJI's official sample does nothing beyond
+ * registerApp() (its MSDKManagerVM just logs onProductConnect), exposes no
+ * reconnect/refresh action key anywhere under dji.v5.manager.*, and DJI staff state in
+ * #427 that the preemption/stall "is caused by the design of the remote control firmware"
+ * with force-stopping DJI Fly/Pilot as the only remedy; the issue reporter reproduced the
+ * stall with DJI Fly NEVER opened since RC boot, and it remained unfixed as of Dec 2025.
+ * MSDK's own USB layer (dji.sdk.datalink.usb.DJIUsbAccessoryReceiver, disassembled from
+ * the real 5.18.0 jar) already self-retries the phone<->RC hop on 2-3s timers -- which is
+ * why onProductConnect is reliable while the RC<->aircraft hop can stay down. What IS
+ * achievable app-side, and done here: [remoteControllerConnectedFlow] to isolate which hop
+ * is broken, and [probeFlightControllerLink] as a lightweight read-only request down the
+ * FC channel so a stall is at least observable (and, unproven, possibly nudged).
  */
 class AircraftConnectionRepository {
 
@@ -56,6 +73,14 @@ class AircraftConnectionRepository {
      *  on-device: RC-N3 linked to the phone over USB, but no app holding the aircraft link,
      *  aircraft LEDs flashing red / error, zero FlightController telemetry flowing). */
     val flightControllerConnectedFlow: Flow<Boolean> = keyFlow(FlightControllerKey.KeyConnection)
+
+    /** The RC-N3's own key-channel connection state (`RemoteControllerKey.KeyConnection`,
+     *  verified present on the real 5.18.0 jar's DJIRemoteControllerKey). Splits the two
+     *  hops apart diagnostically: true here + false on [flightControllerConnectedFlow]
+     *  means the phone<->RC USB/key channel is healthy and the stall is the RC<->aircraft
+     *  hop (the issue-#427 firmware state); false here means the USB hop itself is the
+     *  problem (replug the cable) despite SDKManager reporting ProductConnected. */
+    val remoteControllerConnectedFlow: Flow<Boolean> = keyFlow(RemoteControllerKey.KeyConnection)
 
     /** Combined snapshot the flight state machine actually consumes each tick. */
     val telemetryFlow: Flow<AircraftTelemetry> = combine(
@@ -77,6 +102,40 @@ class AircraftConnectionRepository {
             headingDegrees = heading,
             batteryPercent = batteryPercent,
             isFlying = isFlying,
+        )
+    }
+
+    /**
+     * Active, read-only request down the flight-controller key channel (async
+     * `KeyManager.getValue(DJIKey, CompletionCallbackWithParam)` on
+     * `FlightControllerKey.KeySerialNumber` -- signature verified against the real
+     * 5.18.0 jar; unlike the synchronous cached `getValue(DJIKey)` used in [keyFlow],
+     * the callback overload issues a real request toward the device).
+     *
+     * Called on a bounded timer by WingmanViewModel while the FC link is down after
+     * ProductConnect. Honest scope: there is no evidence this un-sticks the RC firmware
+     * state (see class header -- DJI provides no such API), but it is harmless, it is
+     * exactly the "lightweight FC-touching call" a retry can make, and its onFailure
+     * error code/description makes the stall observable in logcat instead of the app
+     * silently waiting on a listener that never fires.
+     */
+    fun probeFlightControllerLink() {
+        val key = KeyTools.createKey(FlightControllerKey.KeySerialNumber)
+        KeyManager.getInstance().getValue(
+            key,
+            object : CommonCallbacks.CompletionCallbackWithParam<String> {
+                override fun onSuccess(value: String?) {
+                    Log.i(TAG, "FC link probe (KeySerialNumber) success: $value")
+                }
+
+                override fun onFailure(error: IDJIError) {
+                    Log.w(
+                        TAG,
+                        "FC link probe (KeySerialNumber) failure: ${error.description()} " +
+                            "(errorType=${error.errorType()}, errorCode=${error.errorCode()}, innerCode=${error.innerCode()})",
+                    )
+                }
+            },
         )
     }
 

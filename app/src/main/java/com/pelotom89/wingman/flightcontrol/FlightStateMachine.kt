@@ -1,5 +1,6 @@
 package com.pelotom89.wingman.flightcontrol
 
+import android.util.Log
 import com.pelotom89.wingman.location.LocationFix
 import com.pelotom89.wingman.sdk.AircraftTelemetry
 import com.pelotom89.wingman.sdk.ObstacleSnapshot
@@ -76,8 +77,15 @@ class FlightStateMachine(
         }
     }
 
+    private var lastLoggedOverride: Boolean? = null
+
     private fun process(tick: Tick) {
+        if (tick.overrideActive != lastLoggedOverride) {
+            Log.i("WingmanUI", "tick.overrideActive changed to ${tick.overrideActive}")
+            lastLoggedOverride = tick.overrideActive
+        }
         if (tick.overrideActive) {
+            Log.i("WingmanUI", "process() saw overrideActive=true, switching to ManualOverride")
             _flightStateFlow.value = FlightState.ManualOverride
             _commandFlow.value = VirtualStickCommand.ZERO
             return

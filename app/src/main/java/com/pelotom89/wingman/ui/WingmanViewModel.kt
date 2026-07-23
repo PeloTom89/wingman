@@ -1,6 +1,7 @@
 package com.pelotom89.wingman.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pelotom89.wingman.core.FlightLogger
@@ -16,12 +17,28 @@ import com.pelotom89.wingman.sdk.PerceptionRepository
 import com.pelotom89.wingman.sdk.SdkRegistrationState
 import com.pelotom89.wingman.sdk.VirtualStickController
 import com.pelotom89.wingman.sdk.WingmanApplication
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
+
+/** How long the FC link may stay down after ProductConnect before the UI calls it stalled
+ *  (on healthy runs it was observed coming up within a few seconds of onProductConnect). */
+private const val FC_LINK_STALL_TIMEOUT_MS = 20_000L
+
+/** Cadence/bound for the read-only FC probe while waiting (see
+ *  AircraftConnectionRepository.probeFlightControllerLink for what it can and can't do). */
+private const val FC_PROBE_INTERVAL_MS = 5_000L
+private const val FC_PROBE_MAX_ATTEMPTS = 24
 
 /**
  * Composition root wiring sdk/ + location/ + flightcontrol/ together, and the single
@@ -42,9 +59,11 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     private val gimbalController = GimbalController()
 
     private val commandFlowHolder = MutableStateFlow(com.pelotom89.wingman.sdk.VirtualStickCommand.ZERO)
+    // Single shared instance -- see ManualOverrideGate's header comment for the real bug
+    // (two disconnected flows) this replaced.
     private val overrideActiveHolder = MutableStateFlow(false)
     private val virtualStickController = VirtualStickController(commandFlowHolder, overrideActiveHolder)
-    private val manualOverrideGate = ManualOverrideGate(virtualStickController)
+    private val manualOverrideGate = ManualOverrideGate(overrideActiveHolder, virtualStickController)
     private val flightLogger = FlightLogger(application)
     private val flightSafetyActionsController = FlightSafetyActionsController()
 
@@ -65,6 +84,39 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     /** Distinct from [registrationState]'s ProductConnected -- see
      *  AircraftConnectionRepository.flightControllerConnectedFlow's header comment. */
     val flightControllerConnected: StateFlow<Boolean> = aircraftConnectionRepository.flightControllerConnectedFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    /** RC-N3 key-channel health, for isolating WHICH hop is broken when the FC link is
+     *  down -- see AircraftConnectionRepository.remoteControllerConnectedFlow. */
+    val remoteControllerConnected: StateFlow<Boolean> = aircraftConnectionRepository.remoteControllerConnectedFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    /** True while SDKManager reports the product (RC-N3 over USB) connected but the
+     *  aircraft's flight controller hasn't come up -- the window where either the link is
+     *  still establishing (normal for the first few seconds) or the RC firmware is stuck
+     *  in the DJI-acknowledged preempted state (Mobile-SDK-Android-V5 issue #427). */
+    private val awaitingFlightController: Flow<Boolean> = combine(
+        WingmanApplication.instance.registrationStateFlow,
+        flightControllerConnected,
+    ) { registration, fcConnected ->
+        registration is SdkRegistrationState.ProductConnected && !fcConnected
+    }.distinctUntilChanged()
+
+    /** Surfaced on the preflight screen: the FC link has been down for
+     *  [FC_LINK_STALL_TIMEOUT_MS] straight after ProductConnect, which on this hardware
+     *  means it is NOT still establishing -- it's the issue-#427 stuck state, and the
+     *  operator needs to act (force-stop DJI Fly, replug USB) rather than keep waiting.
+     *  There is deliberately no automatic silver bullet behind this: DJI provides no API
+     *  that forces the link up (see AircraftConnectionRepository's header). */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val aircraftLinkStalled: StateFlow<Boolean> = awaitingFlightController
+        .transformLatest { awaiting ->
+            emit(false)
+            if (awaiting) {
+                delay(FC_LINK_STALL_TIMEOUT_MS)
+                emit(true)
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
@@ -92,11 +144,33 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }
+        // Bounded active retry while the FC link is down post-ProductConnect: a read-only
+        // probe request down the FC key channel every few seconds (collectLatest cancels
+        // the loop the moment the link comes up or the product disconnects). This is the
+        // strongest retry MSDK V5's public surface allows -- there is no reconnect API,
+        // and DJI's own sample has no equivalent loop (it just waits, and exhibits the
+        // same intermittent stall; see AircraftConnectionRepository's header for the
+        // issue-#427 evidence). The probe's real value is making each attempt's concrete
+        // native error visible in logcat; aircraftLinkStalled is what tells the operator
+        // to stop waiting and act.
+        viewModelScope.launch {
+            awaitingFlightController.collectLatest { awaiting ->
+                if (awaiting) {
+                    repeat(FC_PROBE_MAX_ATTEMPTS) {
+                        aircraftConnectionRepository.probeFlightControllerLink()
+                        delay(FC_PROBE_INTERVAL_MS)
+                    }
+                }
+            }
+        }
         flightStateMachine.start(viewModelScope)
         virtualStickController.start(viewModelScope)
     }
 
-    fun onManualOverridePressed() = manualOverrideGate.trip()
+    fun onManualOverridePressed() {
+        Log.i("WingmanUI", "onManualOverridePressed called")
+        manualOverrideGate.trip()
+    }
 
     fun onManualOverrideCleared() = manualOverrideGate.clear()
 

@@ -35,6 +35,8 @@ import com.pelotom89.wingman.sdk.SdkRegistrationState
 fun PreflightChecklistScreen(
     registrationState: SdkRegistrationState,
     flightControllerConnected: Boolean,
+    remoteControllerConnected: Boolean,
+    aircraftLinkStalled: Boolean,
     hasGpsFix: Boolean,
     onProceed: () -> Unit,
 ) {
@@ -70,6 +72,36 @@ fun PreflightChecklistScreen(
         // yet-ProductConnected) that was previously only visible by pulling logcat.
         Text("  state: $registrationState", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
         ChecklistRow("Aircraft flight controller connected", flightControllerConnected)
+        // Diagnostic-only (doesn't gate allReady -- if it's false the FC row above is
+        // necessarily also false): splits the two hops apart so a stall is attributable.
+        // True here + FC row stuck = the RC<->aircraft hop (issue-#427 firmware state);
+        // false here = the phone<->RC USB hop itself, despite ProductConnected.
+        Text(
+            "  RC-N3 key channel: ${if (remoteControllerConnected) "responding" else "not responding"}",
+            color = Color.Gray,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        // The FC link either comes up within a few seconds of ProductConnected or not at
+        // all (RC firmware stuck in the state DJI acknowledges in Mobile-SDK-Android-V5
+        // issue #427 and says only force-stopping DJI Fly clears -- there's no API to fix
+        // it from here). Waiting silently was the previous behavior; this tells the
+        // operator when waiting has become pointless and exactly what to do about it.
+        if (aircraftLinkStalled) {
+            Text(
+                if (remoteControllerConnected) {
+                    "Aircraft link stalled (known DJI RC firmware issue): the RC is talking " +
+                        "to the phone, but the aircraft link won't come up on its own. " +
+                        "Fix: Android Settings → Apps → DJI Fly → Force stop, then unplug " +
+                        "and replug the USB cable. If the aircraft LEDs still flash red, " +
+                        "power-cycle the RC and aircraft."
+                } else {
+                    "RC-N3 is not responding on the key channel despite the USB link " +
+                        "reporting connected — unplug and replug the USB cable (try a " +
+                        "different cable/port if it persists)."
+                },
+                color = Color(0xFFFFB74D),
+            )
+        }
         ChecklistRow("Phone GPS fix acquired", hasGpsFix)
 
         Row(verticalAlignment = Alignment.CenterVertically) {

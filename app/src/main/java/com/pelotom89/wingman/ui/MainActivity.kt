@@ -18,6 +18,24 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 
+/**
+ * CameraPreviewScreen is composed unconditionally behind BOTH [Screen]s, not just
+ * [Screen.FLIGHT] -- see CameraPreviewScreen's header comment. Decompiling Dronelink,
+ * Litchi Pilot, and Maven EVO (2026-07-22, all three confirmed reliably reaching
+ * FlightControllerKey.KeyConnection where Wingman was stalling on the same aircraft/RC-N3)
+ * found all three bind ICameraStreamManager.putCameraStreamSurface unconditionally, as
+ * soon as their video surface exists -- never gated behind any FlightController connection
+ * check. Wingman previously only ever reached CameraPreviewScreen (nested inside
+ * Screen.FLIGHT) AFTER flightControllerConnected was already true, since
+ * PreflightChecklistScreen's "Begin flight" button that switches to Screen.FLIGHT is
+ * itself disabled until flightControllerConnected is true -- a structural chicken-and-egg
+ * that meant Wingman never got a chance to test whether requesting the video stream early
+ * helps establish the aircraft link, unlike every working competitor. Composing it behind
+ * the checklist (invisible under its opaque black background, but still attached to the
+ * window and laid out, so its TextureView still gets a real Surface and still calls
+ * putCameraStreamSurface) removes that gate without weakening the "Begin flight" gate
+ * itself, which still requires flightControllerConnected.
+ */
 private enum class Screen { PREFLIGHT, FLIGHT }
 
 class MainActivity : ComponentActivity() {
@@ -46,28 +64,39 @@ class MainActivity : ComponentActivity() {
 
                 val registrationState by viewModel.registrationState.collectAsStateWithLifecycle()
                 val flightControllerConnected by viewModel.flightControllerConnected.collectAsStateWithLifecycle()
+                val remoteControllerConnected by viewModel.remoteControllerConnected.collectAsStateWithLifecycle()
+                val aircraftLinkStalled by viewModel.aircraftLinkStalled.collectAsStateWithLifecycle()
                 val flightState by viewModel.flightState.collectAsStateWithLifecycle()
                 val telemetry by viewModel.telemetry.collectAsStateWithLifecycle()
 
-                when (screen) {
-                    Screen.PREFLIGHT -> PreflightChecklistScreen(
-                        registrationState = registrationState,
-                        flightControllerConnected = flightControllerConnected,
-                        hasGpsFix = telemetry != null,
-                        onProceed = { screen = Screen.FLIGHT },
-                    )
-                    Screen.FLIGHT -> Box(modifier = Modifier.fillMaxSize()) {
-                        CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
-                        HudOverlay(flightState = flightState, telemetry = telemetry)
-                        StartFollowingButton(
-                            flightState = flightState,
-                            onPressed = { viewModel.onStartFollowingPressed() },
-                            modifier = Modifier.align(Alignment.BottomStart),
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Composed unconditionally, behind both screens -- see this file's
+                    // header comment. On PREFLIGHT this sits under PreflightChecklistScreen's
+                    // opaque black background (invisible, but still attached/laid out, so
+                    // putCameraStreamSurface still fires as early as possible).
+                    CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
+
+                    when (screen) {
+                        Screen.PREFLIGHT -> PreflightChecklistScreen(
+                            registrationState = registrationState,
+                            flightControllerConnected = flightControllerConnected,
+                            remoteControllerConnected = remoteControllerConnected,
+                            aircraftLinkStalled = aircraftLinkStalled,
+                            hasGpsFix = telemetry != null,
+                            onProceed = { screen = Screen.FLIGHT },
                         )
-                        ManualOverrideButton(
-                            onPressed = { viewModel.onManualOverridePressed() },
-                            modifier = Modifier.align(Alignment.BottomEnd),
-                        )
+                        Screen.FLIGHT -> {
+                            HudOverlay(flightState = flightState, telemetry = telemetry)
+                            StartFollowingButton(
+                                flightState = flightState,
+                                onPressed = { viewModel.onStartFollowingPressed() },
+                                modifier = Modifier.align(Alignment.BottomStart),
+                            )
+                            ManualOverrideButton(
+                                onPressed = { viewModel.onManualOverridePressed() },
+                                modifier = Modifier.align(Alignment.BottomEnd),
+                            )
+                        }
                     }
                 }
             }

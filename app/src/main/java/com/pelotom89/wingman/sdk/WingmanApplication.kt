@@ -105,6 +105,19 @@ class WingmanApplication : Application() {
         })
     }
 
+    // RULED OUT (2026-07-22): dji.v5.manager.diagnostic.* (DeviceStatusManager,
+    // DeviceHealthManager) -- DeviceStatusManager.init() crashes with UnsatisfiedLinkError
+    // (a native JNI method with no implementation loaded), and even listener-only usage
+    // (no init() call, matching how Dronelink/Litchi/Maven EVO's own bundled DJI UXSDK
+    // widgets use it) crashes with NoClassDefFoundError: DJIDeviceStatusChangeListener isn't
+    // resolvable at runtime in this app at all. Unlike dji.v5.manager.{SDKManager,KeyManager,
+    // aircraft.*}, which DO work (SecNeo injects real implementations for those), the
+    // diagnostic subpackage's real classes are apparently NOT included in whatever gets
+    // injected into THIS app -- competitor apps likely bundle an additional DJI module/AAR
+    // Wingman doesn't have. Do not re-attempt dji.v5.manager.diagnostic.* without first
+    // confirming (via javap or decompiling their APK's dependency manifest) which artifact
+    // actually provides it.
+
     companion object {
         lateinit var instance: WingmanApplication
             private set
