@@ -1,6 +1,8 @@
 package com.pelotom89.wingman.ui
 
+import android.util.Log
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
@@ -15,12 +17,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+
+private const val TAG = "WingmanJoystick"
 
 /**
  * Spring-to-center touch joystick. Reports normalized x/y in [-1, 1] (screen convention:
@@ -42,8 +47,23 @@ fun Joystick(
         modifier = modifier
             .size(size)
             .background(Color.White.copy(alpha = 0.15f), CircleShape)
+            // Raw touch-down diagnostic, independent of detectDragGestures below: fires on
+            // ANY finger contact inside this Box's bounds, unconsumed, so it can't interfere
+            // with the drag detector -- added 2026-07-23 after a real flight test showed
+            // enableVirtualStick succeeding (authorityOwner=MSDK confirmed) but zero
+            // onManualStickChanged calls, meaning the drag was never even detected. This
+            // tells us whether the finger is reaching this composable at all (vs. e.g. an
+            // AndroidView sibling stealing touch) versus reaching it but not exceeding
+            // detectDragGestures' built-in touch-slop threshold to count as a drag.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    Log.i(TAG, "raw touch down")
+                }
+            }
             .pointerInput(Unit) {
                 detectDragGestures(
+                    onDragStart = { Log.i(TAG, "onDragStart") },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         val raw = knobOffset + dragAmount
@@ -52,10 +72,12 @@ fun Joystick(
                         onChange(knobOffset.x / radiusPx, knobOffset.y / radiusPx)
                     },
                     onDragEnd = {
+                        Log.i(TAG, "onDragEnd")
                         knobOffset = Offset.Zero
                         onChange(0f, 0f)
                     },
                     onDragCancel = {
+                        Log.i(TAG, "onDragCancel")
                         knobOffset = Offset.Zero
                         onChange(0f, 0f)
                     },
