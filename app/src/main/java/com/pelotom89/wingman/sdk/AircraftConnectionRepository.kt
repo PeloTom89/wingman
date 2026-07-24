@@ -110,18 +110,30 @@ class AircraftConnectionRepository {
                     KeyTools.createKey(keyInfo),
                     object : CommonCallbacks.CompletionCallbackWithParam<T> {
                         override fun onSuccess(value: T?) {
-                            Log.i("WingmanPoll", "${keyInfo.identifier} = $value")
+                            logOnChange(keyInfo.identifier, "OK") { Log.i("WingmanPoll", "${keyInfo.identifier} = $value") }
                             if (cont.isActive) cont.resume(value)
                         }
 
                         override fun onFailure(error: IDJIError) {
-                            Log.w("WingmanPoll", "${keyInfo.identifier} FAIL code=${error.errorCode()}")
+                            val code = error.errorCode().toString()
+                            logOnChange(keyInfo.identifier, code) { Log.w("WingmanPoll", "${keyInfo.identifier} FAIL code=$code") }
                             if (cont.isActive) cont.resume(null)
                         }
                     },
                 )
             }
         }
+
+    /** getValue fires every [POLL_INTERVAL_MS] per key -- logging every call floods logcat's
+     *  buffer fast enough to evict one-shot diagnostic lines from elsewhere in the app
+     *  (verified on-device: a 36-minute run left zero WingmanCameraStream/WingmanUI lines in
+     *  the buffer, all evicted by WingmanPoll spam). Only log when a key's outcome actually
+     *  changes, so the buffer still shows connection state transitions without the noise. */
+    private val lastLoggedOutcome = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private inline fun logOnChange(identifier: String, outcome: String, log: () -> Unit) {
+        if (lastLoggedOutcome.put(identifier, outcome) != outcome) log()
+    }
 
     private companion object {
         /** getValue can hang on an unhealthy link; cap each read so the poll loop survives. */

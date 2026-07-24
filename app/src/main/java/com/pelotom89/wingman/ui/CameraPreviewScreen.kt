@@ -51,10 +51,16 @@ fun CameraPreviewScreen(cameraIndex: ComponentIndexType, modifier: Modifier = Mo
     // putCameraStreamSurface, not these, so they were never tried. Remove/simplify once the
     // connection-reliability question is settled.
     DisposableEffect(Unit) {
+        // enableStream(cameraIndex, true) and setKeepAliveDecoding(true) were tried here
+        // (2026-07-22) but REMOVED (2026-07-23): unlike putCameraStreamSurface below, neither
+        // call was ever found in the three working competitor apps' decompiled code (Dronelink/
+        // Litchi/Maven only call putCameraStreamSurface) -- they were an unverified experiment,
+        // not a confirmed-safe pattern, and are a plausible cause of the aircraft going to the
+        // red error state when this screen is opened before the flight-controller link is
+        // established. Removed rather than gated, since the safe/proven call is
+        // putCameraStreamSurface alone.
         val streamManager = MediaDataCenter.getInstance().cameraStreamManager
-        Log.i(TAG, "composed, calling enableStream(true)")
-        streamManager.enableStream(cameraIndex, true)
-        streamManager.setKeepAliveDecoding(true)
+        Log.i(TAG, "composed")
 
         var receivedFirstFrame = false
         val receiveListener = ICameraStreamManager.ReceiveStreamListener { data, offset, length, streamInfo ->
