@@ -11,6 +11,7 @@ class SafetyLimitsTest {
     private val limits = SafetyLimits(
         maxHorizontalSpeedMetersPerSecond = 3.0,
         maxVerticalSpeedMetersPerSecond = 1.5,
+        maxYawDegreesPerSecond = 60.0,
         maxAltitudeMetersAgl = 8.0,
         geofenceRadiusMeters = 100.0,
         batteryRthTriggerPercent = 30,
@@ -43,6 +44,34 @@ class SafetyLimitsTest {
         val clamped = limits.clampSpeed(command)
 
         assertEquals(1.5, clamped.verticalMetersPerSecond, 0.0001)
+    }
+
+    @Test
+    fun `yaw rate is coerced into range independent of translation`() {
+        val command = VirtualStickCommand(
+            pitchMetersPerSecond = 0.0,
+            rollMetersPerSecond = 0.0,
+            yawDegreesPerSecond = 200.0,
+            verticalMetersPerSecond = 0.0,
+        )
+
+        val clamped = limits.clampSpeed(command)
+
+        assertEquals(60.0, clamped.yawDegreesPerSecond, 0.0001)
+    }
+
+    @Test
+    fun `yaw rate under the cap is left untouched, sign preserved`() {
+        val command = VirtualStickCommand(
+            pitchMetersPerSecond = 0.0,
+            rollMetersPerSecond = 0.0,
+            yawDegreesPerSecond = -30.0,
+            verticalMetersPerSecond = 0.0,
+        )
+
+        val clamped = limits.clampSpeed(command)
+
+        assertEquals(-30.0, clamped.yawDegreesPerSecond, 0.0001)
     }
 
     @Test

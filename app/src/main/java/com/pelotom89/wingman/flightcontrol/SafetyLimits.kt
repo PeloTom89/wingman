@@ -19,6 +19,7 @@ import kotlin.math.sqrt
 data class SafetyLimits(
     val maxHorizontalSpeedMetersPerSecond: Double = 3.0,
     val maxVerticalSpeedMetersPerSecond: Double = 1.5,
+    val maxYawDegreesPerSecond: Double = 60.0,
     val maxAltitudeMetersAgl: Double = 8.0,
     val geofenceRadiusMeters: Double = 100.0,
     val batteryRthTriggerPercent: Int = 30,
@@ -32,6 +33,8 @@ data class SafetyLimits(
         return command.copy(
             pitchMetersPerSecond = command.pitchMetersPerSecond / horizontalScale,
             rollMetersPerSecond = command.rollMetersPerSecond / horizontalScale,
+            yawDegreesPerSecond = command.yawDegreesPerSecond
+                .coerceIn(-maxYawDegreesPerSecond, maxYawDegreesPerSecond),
             verticalMetersPerSecond = command.verticalMetersPerSecond
                 .coerceIn(-maxVerticalSpeedMetersPerSecond, maxVerticalSpeedMetersPerSecond),
         )

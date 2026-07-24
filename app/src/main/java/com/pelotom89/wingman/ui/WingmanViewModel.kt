@@ -239,16 +239,22 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** Joystick input, already in the app's body-frame convention (pitch+/roll+/vertical+ =
-     *  forward/right/up). Run through the same SafetyLimits.clampSpeed every Following
-     *  command gets -- manual flight bypasses FlightStateMachine (see manualFlightActiveHolder's
-     *  comment above), so this is the one place left responsible for enforcing it. */
-    fun onManualStickChanged(pitchMetersPerSecond: Double, rollMetersPerSecond: Double, verticalMetersPerSecond: Double) {
+    /** Joystick input, already in the app's body-frame convention (pitch+/roll+/yaw+/vertical+
+     *  = forward/right/clockwise/up). Run through the same SafetyLimits.clampSpeed every
+     *  Following command gets -- manual flight bypasses FlightStateMachine (see
+     *  manualFlightActiveHolder's comment above), so this is the one place left responsible
+     *  for enforcing it, yaw rate included. */
+    fun onManualStickChanged(
+        pitchMetersPerSecond: Double,
+        rollMetersPerSecond: Double,
+        yawDegreesPerSecond: Double,
+        verticalMetersPerSecond: Double,
+    ) {
         manualStickCommandHolder.value = safetyLimits.clampSpeed(
             VirtualStickCommand(
                 pitchMetersPerSecond = pitchMetersPerSecond,
                 rollMetersPerSecond = rollMetersPerSecond,
-                yawDegreesPerSecond = 0.0,
+                yawDegreesPerSecond = yawDegreesPerSecond,
                 verticalMetersPerSecond = verticalMetersPerSecond,
             ),
         )

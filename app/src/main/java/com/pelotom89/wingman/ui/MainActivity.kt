@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
                         Screen.VIDEO_TEST -> Box(modifier = Modifier.fillMaxSize()) {
                             val manualFlightActive by viewModel.manualFlightActive.collectAsStateWithLifecycle()
                             var stickPitchRoll by remember { mutableStateOf(Offset.Zero) }
+                            var stickYaw by remember { mutableStateOf(0f) }
                             var stickVertical by remember { mutableStateOf(0f) }
 
                             CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
@@ -149,22 +150,26 @@ class MainActivity : ComponentActivity() {
                                         .padding(bottom = 88.dp),
                                     horizontalArrangement = Arrangement.spacedBy(48.dp),
                                 ) {
-                                    // Left stick: up/down only.
-                                    Joystick(lockHorizontal = true, size = 120.dp) { _, y ->
+                                    // Left stick, Mode-2 RC convention: x = yaw (turn
+                                    // left/right), y = vertical (up/down).
+                                    Joystick(size = 120.dp) { x, y ->
+                                        stickYaw = x * JOYSTICK_SAFETY_LIMITS.maxYawDegreesPerSecond.toFloat()
                                         stickVertical = -y * JOYSTICK_SAFETY_LIMITS.maxVerticalSpeedMetersPerSecond.toFloat()
                                         viewModel.onManualStickChanged(
                                             pitchMetersPerSecond = stickPitchRoll.y.toDouble(),
                                             rollMetersPerSecond = stickPitchRoll.x.toDouble(),
+                                            yawDegreesPerSecond = stickYaw.toDouble(),
                                             verticalMetersPerSecond = stickVertical.toDouble(),
                                         )
                                     }
-                                    // Right stick: forward/back + left/right.
+                                    // Right stick: forward/back (pitch) + strafe left/right (roll).
                                     Joystick(size = 140.dp) { x, y ->
                                         val maxHorizontal = JOYSTICK_SAFETY_LIMITS.maxHorizontalSpeedMetersPerSecond.toFloat()
                                         stickPitchRoll = Offset(x = x * maxHorizontal, y = -y * maxHorizontal)
                                         viewModel.onManualStickChanged(
                                             pitchMetersPerSecond = stickPitchRoll.y.toDouble(),
                                             rollMetersPerSecond = stickPitchRoll.x.toDouble(),
+                                            yawDegreesPerSecond = stickYaw.toDouble(),
                                             verticalMetersPerSecond = stickVertical.toDouble(),
                                         )
                                     }

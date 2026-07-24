@@ -25,15 +25,14 @@ import kotlin.math.roundToInt
 /**
  * Spring-to-center touch joystick. Reports normalized x/y in [-1, 1] (screen convention:
  * +x right, +y DOWN) via [onChange] continuously while dragging, and (0, 0) on release --
- * callers convert to the app's body-frame command convention (pitch+/roll+/vertical+ =
- * forward/right/up) rather than this widget assuming one, since the two instances on the
- * video test screen use different axes ([lockHorizontal] for the up/down-only stick).
+ * callers convert to the app's body-frame command convention (pitch+/roll+/yaw+/vertical+ =
+ * forward/right/clockwise/up) rather than this widget assuming one, since the two instances
+ * on the video test screen (yaw+vertical, pitch+roll) use their axes differently.
  */
 @Composable
 fun Joystick(
     modifier: Modifier = Modifier,
     size: Dp = 140.dp,
-    lockHorizontal: Boolean = false,
     onChange: (x: Float, y: Float) -> Unit,
 ) {
     var knobOffset by remember { mutableStateOf(Offset.Zero) }
@@ -43,14 +42,13 @@ fun Joystick(
         modifier = modifier
             .size(size)
             .background(Color.White.copy(alpha = 0.15f), CircleShape)
-            .pointerInput(lockHorizontal) {
+            .pointerInput(Unit) {
                 detectDragGestures(
                     onDrag = { change, dragAmount ->
                         change.consume()
                         val raw = knobOffset + dragAmount
-                        val constrained = if (lockHorizontal) raw.copy(x = 0f) else raw
-                        val distance = constrained.getDistance()
-                        knobOffset = if (distance > radiusPx) constrained * (radiusPx / distance) else constrained
+                        val distance = raw.getDistance()
+                        knobOffset = if (distance > radiusPx) raw * (radiusPx / distance) else raw
                         onChange(knobOffset.x / radiusPx, knobOffset.y / radiusPx)
                     },
                     onDragEnd = {
