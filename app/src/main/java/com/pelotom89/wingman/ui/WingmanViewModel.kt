@@ -9,12 +9,14 @@ import com.pelotom89.wingman.flightcontrol.FlightState
 import com.pelotom89.wingman.flightcontrol.FlightStateMachine
 import com.pelotom89.wingman.flightcontrol.LatLon
 import com.pelotom89.wingman.flightcontrol.ManualOverrideGate
+import com.pelotom89.wingman.flightcontrol.SafetyLimits
 import com.pelotom89.wingman.location.SubjectLocationProvider
 import com.pelotom89.wingman.sdk.AircraftConnectionRepository
 import com.pelotom89.wingman.sdk.FlightSafetyActionsController
 import com.pelotom89.wingman.sdk.GimbalController
 import com.pelotom89.wingman.sdk.PerceptionRepository
 import com.pelotom89.wingman.sdk.SdkRegistrationState
+import com.pelotom89.wingman.sdk.VirtualStickCommand
 import com.pelotom89.wingman.sdk.VirtualStickController
 import com.pelotom89.wingman.sdk.WingmanApplication
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -66,6 +69,19 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     private val manualOverrideGate = ManualOverrideGate(overrideActiveHolder, virtualStickController)
     private val flightLogger = FlightLogger(application)
     private val flightSafetyActionsController = FlightSafetyActionsController()
+    private val safetyLimits = SafetyLimits()
+
+    // Manual joystick test control (video test screen) -- deliberately bypasses
+    // FlightStateMachine entirely, same spirit as onTestTakeoffPressed/onTestLandPressed:
+    // a direct, isolated path for confirming manual flight control works, independent of
+    // (and never active at the same time UI-wise as) GPS-only Following. commandFlowHolder
+    // mirrors whichever source is "live" -- FlightStateMachine normally, or this holder
+    // while manual flight is toggled on -- so VirtualStickController still has exactly one
+    // command input and SafetyLimits.clampSpeed is still applied to every command that
+    // reaches it, same invariant FlightStateMachine.process() maintains for Following.
+    private val manualFlightActiveHolder = MutableStateFlow(false)
+    private val manualStickCommandHolder = MutableStateFlow(VirtualStickCommand.ZERO)
+    val manualFlightActive: StateFlow<Boolean> get() = manualFlightActiveHolder.asStateFlow()
 
     private val flightStateMachine = FlightStateMachine(
         telemetryFlow = aircraftConnectionRepository.telemetryFlow,
@@ -121,7 +137,13 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         viewModelScope.launch {
-            flightStateMachine.commandFlow.collect { commandFlowHolder.value = it }
+            combine(
+                flightStateMachine.commandFlow,
+                manualStickCommandHolder,
+                manualFlightActiveHolder,
+            ) { fsmCommand, manualCommand, manualActive ->
+                if (manualActive) manualCommand else fsmCommand
+            }.collect { commandFlowHolder.value = it }
         }
         // Gimbal aiming is independent of the VirtualStick command path entirely -- see
         // FlightCommandCalculator's header comment on why the aircraft yaws to face the
@@ -197,6 +219,39 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     fun onTestLandPressed() {
         Log.i("WingmanUI", "onTestLandPressed")
         flightSafetyActionsController.startAutoLanding()
+    }
+
+    /** Enables/disables the joystick test control on the video test screen. Starting
+     *  VirtualStick here follows the same rule as onStartFollowingPressed -- only ever do
+     *  it on an operator action, on a link the operator has already confirmed is healthy
+     *  (e.g. Takeoff already worked), never at launch. Disabling zeros the command and
+     *  releases VirtualStick control back to the aircraft's own hold behavior, same as
+     *  onCleared(). VirtualStickController.start()/stop() are idempotent, so this is safe
+     *  to toggle even if Start Following elsewhere also called start(). */
+    fun onManualFlightToggled(enabled: Boolean) {
+        Log.i("WingmanUI", "onManualFlightToggled($enabled)")
+        manualFlightActiveHolder.value = enabled
+        if (enabled) {
+            virtualStickController.start(viewModelScope)
+        } else {
+            manualStickCommandHolder.value = VirtualStickCommand.ZERO
+            virtualStickController.stop()
+        }
+    }
+
+    /** Joystick input, already in the app's body-frame convention (pitch+/roll+/vertical+ =
+     *  forward/right/up). Run through the same SafetyLimits.clampSpeed every Following
+     *  command gets -- manual flight bypasses FlightStateMachine (see manualFlightActiveHolder's
+     *  comment above), so this is the one place left responsible for enforcing it. */
+    fun onManualStickChanged(pitchMetersPerSecond: Double, rollMetersPerSecond: Double, verticalMetersPerSecond: Double) {
+        manualStickCommandHolder.value = safetyLimits.clampSpeed(
+            VirtualStickCommand(
+                pitchMetersPerSecond = pitchMetersPerSecond,
+                rollMetersPerSecond = rollMetersPerSecond,
+                yawDegreesPerSecond = 0.0,
+                verticalMetersPerSecond = verticalMetersPerSecond,
+            ),
+        )
     }
 
     fun onManualOverridePressed() {

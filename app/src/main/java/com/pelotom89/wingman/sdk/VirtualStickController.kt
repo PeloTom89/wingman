@@ -38,7 +38,12 @@ class VirtualStickController(
 ) {
     private var loopJob: Job? = null
 
+    /** Idempotent: a second call (e.g. manual-joystick flight started after Start Following
+     *  already ran, or vice versa) replaces the existing loop instead of leaking a second
+     *  one racing it at 10Hz. */
     fun start(scope: CoroutineScope) {
+        loopJob?.cancel()
+
         VirtualStickManager.getInstance().enableVirtualStick(null)
         VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(true)
 

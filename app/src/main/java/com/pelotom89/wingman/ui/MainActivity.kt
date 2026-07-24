@@ -23,10 +23,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.pelotom89.wingman.flightcontrol.SafetyLimits
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 
 private enum class Screen { PREFLIGHT, FLIGHT, VIDEO_TEST }
+
+/** Single source of truth for the joystick's max output -- reads SafetyLimits' own defaults
+ *  rather than duplicating the numbers, so the stick's proportional feel always matches the
+ *  clamp WingmanViewModel.onManualStickChanged applies to every command anyway. */
+private val JOYSTICK_SAFETY_LIMITS = SafetyLimits()
 
 class MainActivity : ComponentActivity() {
 
@@ -76,6 +83,10 @@ class MainActivity : ComponentActivity() {
                         // just an unreliable signal -- meaning the "not connected" state is a
                         // gating bug, not a real connection failure. Tap anywhere to go back.
                         Screen.VIDEO_TEST -> Box(modifier = Modifier.fillMaxSize()) {
+                            val manualFlightActive by viewModel.manualFlightActive.collectAsStateWithLifecycle()
+                            var stickPitchRoll by remember { mutableStateOf(Offset.Zero) }
+                            var stickVertical by remember { mutableStateOf(0f) }
+
                             CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
                             HudOverlay(flightState = flightState, telemetry = telemetry)
                             Button(
@@ -105,6 +116,59 @@ class MainActivity : ComponentActivity() {
                                     onClick = { viewModel.onTestLandPressed() },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
                                 ) { Text("Land") }
+                            }
+                            // Manual joystick flight test -- see WingmanViewModel's
+                            // manualFlightActiveHolder comment. STOP/Resume mirror the flight
+                            // screen's ManualOverrideButton/clear so a runaway stick has the
+                            // same immediate, no-confirmation escape hatch real flight does.
+                            Row(
+                                modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Button(
+                                    onClick = { viewModel.onManualFlightToggled(!manualFlightActive) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (manualFlightActive) Color(0xFF2E7D32) else Color.DarkGray,
+                                    ),
+                                ) { Text(if (manualFlightActive) "Manual control: ON" else "Enable manual control") }
+                                if (manualFlightActive) {
+                                    Button(
+                                        onClick = { viewModel.onManualOverridePressed() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                                    ) { Text("STOP") }
+                                    Button(
+                                        onClick = { viewModel.onManualOverrideCleared() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                                    ) { Text("Resume") }
+                                }
+                            }
+                            if (manualFlightActive) {
+                                Row(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .padding(bottom = 88.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(48.dp),
+                                ) {
+                                    // Left stick: up/down only.
+                                    Joystick(lockHorizontal = true, size = 120.dp) { _, y ->
+                                        stickVertical = -y * JOYSTICK_SAFETY_LIMITS.maxVerticalSpeedMetersPerSecond.toFloat()
+                                        viewModel.onManualStickChanged(
+                                            pitchMetersPerSecond = stickPitchRoll.y.toDouble(),
+                                            rollMetersPerSecond = stickPitchRoll.x.toDouble(),
+                                            verticalMetersPerSecond = stickVertical.toDouble(),
+                                        )
+                                    }
+                                    // Right stick: forward/back + left/right.
+                                    Joystick(size = 140.dp) { x, y ->
+                                        val maxHorizontal = JOYSTICK_SAFETY_LIMITS.maxHorizontalSpeedMetersPerSecond.toFloat()
+                                        stickPitchRoll = Offset(x = x * maxHorizontal, y = -y * maxHorizontal)
+                                        viewModel.onManualStickChanged(
+                                            pitchMetersPerSecond = stickPitchRoll.y.toDouble(),
+                                            rollMetersPerSecond = stickPitchRoll.x.toDouble(),
+                                            verticalMetersPerSecond = stickVertical.toDouble(),
+                                        )
+                                    }
+                                }
                             }
                         }
                         Screen.FLIGHT -> {
