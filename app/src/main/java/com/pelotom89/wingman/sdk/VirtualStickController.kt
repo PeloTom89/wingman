@@ -146,8 +146,17 @@ class VirtualStickController(
         }
 
         val param = VirtualStickFlightControlParam().apply {
-            pitch = command.pitchMetersPerSecond
-            roll = command.rollMetersPerSecond
+            // SWAPPED, confirmed via a real flight test (2026-07-23) after the
+            // rollPitchCoordinateSystem fix let commands finally reach the aircraft:
+            // app.pitchMetersPerSecond (forward/back) consistently produced left/right
+            // motion, and app.rollMetersPerSecond (left/right) consistently produced
+            // forward/back motion -- a clean 90-degree swap across all four directions, not
+            // a sign error. DJI's pitch/roll fields don't match this codebase's own
+            // pitch=forward/roll=right convention (see VirtualStickCommand's doc and
+            // FlightCommandCalculator), so compensate for it here, the one place that
+            // constructs the DJI param, rather than at either caller.
+            pitch = command.rollMetersPerSecond
+            roll = command.pitchMetersPerSecond
             yaw = command.yawDegreesPerSecond
             verticalThrottle = command.verticalMetersPerSecond
             rollPitchControlMode = RollPitchControlMode.VELOCITY
