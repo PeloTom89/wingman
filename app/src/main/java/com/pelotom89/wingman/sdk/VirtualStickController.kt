@@ -1,6 +1,7 @@
 package com.pelotom89.wingman.sdk
 
 import android.util.Log
+import dji.sdk.keyvalue.value.flightcontroller.FlightCoordinateSystem
 import dji.sdk.keyvalue.value.flightcontroller.RollPitchControlMode
 import dji.sdk.keyvalue.value.flightcontroller.VerticalControlMode
 import dji.sdk.keyvalue.value.flightcontroller.VirtualStickFlightControlParam
@@ -152,6 +153,16 @@ class VirtualStickController(
             rollPitchControlMode = RollPitchControlMode.VELOCITY
             yawControlMode = YawControlMode.ANGULAR_VELOCITY
             verticalControlMode = VerticalControlMode.VELOCITY
+            // MISSING FIELD, found via javap against the real 5.17.0 jar (2026-07-23): this
+            // param has an 8th field, rollPitchCoordinateSystem, that was never set here --
+            // left null on every send. Without it the flight controller can't know whether
+            // pitch/roll mean aircraft-relative or north-relative, which plausibly explains
+            // a real flight test where peak commands hit ~max (pitch/roll ~3 m/s, yaw ~60
+            // deg/s, vertical 1.5 m/s -- confirmed via the peak-magnitude log above) with
+            // VirtualStick authority genuinely held (authorityOwner=MSDK) and the aircraft
+            // still not visibly responding. BODY matches this app's existing pitch/roll
+            // convention (aircraft-relative forward/right -- see FlightCommandCalculator).
+            rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
         }
         VirtualStickManager.getInstance().sendVirtualStickAdvancedParam(param)
     }
