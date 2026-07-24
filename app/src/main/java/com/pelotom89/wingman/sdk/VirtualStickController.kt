@@ -13,6 +13,7 @@ import dji.v5.manager.aircraft.virtualstick.VirtualStickState
 import dji.v5.manager.aircraft.virtualstick.VirtualStickStateListener
 import dji.sdk.keyvalue.value.flightcontroller.FlightControlAuthorityChangeReason
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -85,7 +86,15 @@ class VirtualStickController(
         })
         VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(true)
 
-        loopJob = scope.launch {
+        // Dispatchers.Default, not the caller's own (viewModelScope defaults to
+        // Dispatchers.Main.immediate): DJI's single-use advanced-mode params need a fresh
+        // send roughly every 40-200ms or the aircraft reverts to hover (see class header).
+        // Running this loop on the main thread put it in direct scheduling contention with
+        // Compose recomposition and the live video feed -- confirmed on-device (2026-07-23)
+        // as visible micro-stuttering while holding a stick steady in flight, smooth
+        // directional movement otherwise. Off the main thread, a UI-thread stall can no
+        // longer delay a send past the timeout.
+        loopJob = scope.launch(Dispatchers.Default) {
             while (isActive) {
                 val command = if (overrideActiveFlow.value) VirtualStickCommand.ZERO else commandFlow.value
                 sendOnce(command)
