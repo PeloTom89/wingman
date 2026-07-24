@@ -108,7 +108,42 @@ class VirtualStickController(
         sendOnce(VirtualStickCommand.ZERO)
     }
 
+    // Peak-magnitude tracking for the log below -- see its comment.
+    private var peakPitch = 0.0
+    private var peakRoll = 0.0
+    private var peakYaw = 0.0
+    private var peakVertical = 0.0
+    private var sendingNonZero = false
+
     private fun sendOnce(command: VirtualStickCommand) {
+        // The UI only logs the FIRST sample after a stick crosses zero (see
+        // WingmanViewModel.onManualStickChanged), which is necessarily tiny -- it's sampled
+        // right at the touch-slop boundary, not the drag's actual peak. This is the
+        // authoritative record instead: the real magnitude physically handed to
+        // sendVirtualStickAdvancedParam every 100ms, logged once per zero-to-zero episode so
+        // it doesn't flood at 10Hz. Added after a real flight test where the aircraft didn't
+        // visibly respond despite the UI reporting non-zero commands -- this settles whether
+        // the actual sent values ever got large, or stayed small the whole drag.
+        val isZero = command.pitchMetersPerSecond == 0.0 && command.rollMetersPerSecond == 0.0 &&
+            command.yawDegreesPerSecond == 0.0 && command.verticalMetersPerSecond == 0.0
+        if (!isZero) {
+            peakPitch = maxOf(peakPitch, kotlin.math.abs(command.pitchMetersPerSecond))
+            peakRoll = maxOf(peakRoll, kotlin.math.abs(command.rollMetersPerSecond))
+            peakYaw = maxOf(peakYaw, kotlin.math.abs(command.yawDegreesPerSecond))
+            peakVertical = maxOf(peakVertical, kotlin.math.abs(command.verticalMetersPerSecond))
+            sendingNonZero = true
+        } else if (sendingNonZero) {
+            Log.i(
+                TAG,
+                "sent peak this episode: pitch=$peakPitch roll=$peakRoll yaw=$peakYaw vertical=$peakVertical",
+            )
+            peakPitch = 0.0
+            peakRoll = 0.0
+            peakYaw = 0.0
+            peakVertical = 0.0
+            sendingNonZero = false
+        }
+
         val param = VirtualStickFlightControlParam().apply {
             pitch = command.pitchMetersPerSecond
             roll = command.rollMetersPerSecond
