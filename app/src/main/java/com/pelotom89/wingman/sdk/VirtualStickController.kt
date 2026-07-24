@@ -1,16 +1,24 @@
 package com.pelotom89.wingman.sdk
 
+import android.util.Log
 import dji.sdk.keyvalue.value.flightcontroller.RollPitchControlMode
 import dji.sdk.keyvalue.value.flightcontroller.VerticalControlMode
 import dji.sdk.keyvalue.value.flightcontroller.VirtualStickFlightControlParam
 import dji.sdk.keyvalue.value.flightcontroller.YawControlMode
+import dji.v5.common.callback.CommonCallbacks
+import dji.v5.common.error.IDJIError
 import dji.v5.manager.aircraft.virtualstick.VirtualStickManager
+import dji.v5.manager.aircraft.virtualstick.VirtualStickState
+import dji.v5.manager.aircraft.virtualstick.VirtualStickStateListener
+import dji.sdk.keyvalue.value.flightcontroller.FlightControlAuthorityChangeReason
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+private const val TAG = "WingmanVirtualStick"
 
 /**
  * Owns the entire VirtualStick command lifecycle and is the ONLY class in the app allowed
@@ -38,13 +46,42 @@ class VirtualStickController(
 ) {
     private var loopJob: Job? = null
 
+    init {
+        // Previously enableVirtualStick(null)/disableVirtualStick(null) passed no callback,
+        // so a joystick session that silently failed to engage (or never actually held
+        // flight-control authority) looked identical to a working one -- there was no signal
+        // at all. This listener is the ground truth: isVirtualStickEnable() /
+        // isVirtualStickAdvancedModeEnabled() confirm the mode actually engaged, and
+        // getCurrentFlightControlAuthorityOwner() is the real answer to "did commands
+        // actually reach the aircraft" -- if it's still RC (or reverts to RC, e.g. via the
+        // RC_NOT_P_MODE reason DJI defines) after enableVirtualStick reports success, the
+        // aircraft is ignoring VirtualStick commands regardless of what sendVirtualStickAdvancedParam
+        // returns, which looks exactly like "the joystick didn't work" from the UI.
+        VirtualStickManager.getInstance().setVirtualStickStateListener(object : VirtualStickStateListener {
+            override fun onVirtualStickStateUpdate(state: VirtualStickState) {
+                Log.i(
+                    TAG,
+                    "state: enabled=${state.isVirtualStickEnable} advancedMode=${state.isVirtualStickAdvancedModeEnabled} " +
+                        "authorityOwner=${state.currentFlightControlAuthorityOwner}",
+                )
+            }
+
+            override fun onChangeReasonUpdate(reason: FlightControlAuthorityChangeReason) {
+                Log.i(TAG, "authority change reason: $reason")
+            }
+        })
+    }
+
     /** Idempotent: a second call (e.g. manual-joystick flight started after Start Following
      *  already ran, or vice versa) replaces the existing loop instead of leaking a second
      *  one racing it at 10Hz. */
     fun start(scope: CoroutineScope) {
         loopJob?.cancel()
 
-        VirtualStickManager.getInstance().enableVirtualStick(null)
+        VirtualStickManager.getInstance().enableVirtualStick(object : CommonCallbacks.CompletionCallback {
+            override fun onSuccess() { Log.i(TAG, "enableVirtualStick onSuccess") }
+            override fun onFailure(error: IDJIError) { Log.w(TAG, "enableVirtualStick onFailure: $error") }
+        })
         VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(true)
 
         loopJob = scope.launch {
@@ -59,7 +96,10 @@ class VirtualStickController(
     fun stop() {
         loopJob?.cancel()
         loopJob = null
-        VirtualStickManager.getInstance().disableVirtualStick(null)
+        VirtualStickManager.getInstance().disableVirtualStick(object : CommonCallbacks.CompletionCallback {
+            override fun onSuccess() { Log.i(TAG, "disableVirtualStick onSuccess") }
+            override fun onFailure(error: IDJIError) { Log.w(TAG, "disableVirtualStick onFailure: $error") }
+        })
     }
 
     /** Immediate, out-of-band zero — used by ManualOverrideGate for the very next tick,

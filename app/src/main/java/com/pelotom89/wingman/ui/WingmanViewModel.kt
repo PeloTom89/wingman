@@ -210,14 +210,20 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
      *  FlightSafetyActionsController.startTakeoff) -- deliberately NOT routed through
      *  VirtualStickController, since GPS-only following itself hasn't been flight-tested
      *  yet and this is meant to be the lowest-risk way to confirm the aircraft actually
-     *  flies on command. */
+     *  flies on command. Turns manual joystick control off first (see
+     *  onManualFlightToggled) -- an active VirtualStick session fighting DJI's own
+     *  autonomous takeoff for flight-control authority is a real, observed failure mode
+     *  (2026-07-24: Land wouldn't complete after the joystick had been used), not just a
+     *  theoretical one. */
     fun onTestTakeoffPressed() {
         Log.i("WingmanUI", "onTestTakeoffPressed")
+        if (manualFlightActiveHolder.value) onManualFlightToggled(false)
         flightSafetyActionsController.startTakeoff()
     }
 
     fun onTestLandPressed() {
         Log.i("WingmanUI", "onTestLandPressed")
+        if (manualFlightActiveHolder.value) onManualFlightToggled(false)
         flightSafetyActionsController.startAutoLanding()
     }
 
