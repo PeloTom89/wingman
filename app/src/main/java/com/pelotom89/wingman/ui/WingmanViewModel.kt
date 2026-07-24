@@ -256,7 +256,7 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         yawDegreesPerSecond: Double,
         verticalMetersPerSecond: Double,
     ) {
-        manualStickCommandHolder.value = safetyLimits.clampSpeed(
+        val clamped = safetyLimits.clampSpeed(
             VirtualStickCommand(
                 pitchMetersPerSecond = pitchMetersPerSecond,
                 rollMetersPerSecond = rollMetersPerSecond,
@@ -264,7 +264,18 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
                 verticalMetersPerSecond = verticalMetersPerSecond,
             ),
         )
+        // Log only the zero<->non-zero transition (a drag fires this many times/second) --
+        // enough to confirm on-device whether stick input is producing real commands at all,
+        // without flooding the buffer the way an unconditional per-call log would.
+        val isZero = clamped == VirtualStickCommand.ZERO
+        if (isZero != lastManualCommandWasZero) {
+            Log.i("WingmanUI", "onManualStickChanged -> $clamped")
+            lastManualCommandWasZero = isZero
+        }
+        manualStickCommandHolder.value = clamped
     }
+
+    private var lastManualCommandWasZero = true
 
     fun onManualOverridePressed() {
         Log.i("WingmanUI", "onManualOverridePressed called")

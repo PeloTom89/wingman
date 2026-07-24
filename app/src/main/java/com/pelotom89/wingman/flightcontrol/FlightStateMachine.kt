@@ -85,7 +85,12 @@ class FlightStateMachine(
             lastLoggedOverride = tick.overrideActive
         }
         if (tick.overrideActive) {
-            Log.i("WingmanUI", "process() saw overrideActive=true, switching to ManualOverride")
+            // No per-tick log here -- the transition is already captured above
+            // (lastLoggedOverride), and this branch runs every ~200ms tick while override
+            // stays active. A per-tick line here was flooding logcat's buffer badly enough
+            // (30+ seconds of ManualOverride evicted every WingmanVirtualStick/WingmanUI
+            // line from an actual flight test, 2026-07-23) to make on-device diagnosis
+            // impossible -- same class of bug as WingmanPoll's earlier flood.
             _flightStateFlow.value = FlightState.ManualOverride
             _commandFlow.value = VirtualStickCommand.ZERO
             return
