@@ -68,12 +68,30 @@ class AircraftConnectionRepository {
 
     /**
      * Combined aircraft telemetry the flight state machine consumes each tick, POLLED. Each
-     * cycle reads every key via getValue and emits a snapshot; a key that momentarily returns
-     * null (e.g. AircraftLocation indoors with no GPS lock — a REQUEST_TIMEOUT, not a missing
-     * handler) falls back to a neutral default rather than blocking the whole snapshot.
-     * FlightStateMachine already refuses to command on a stale/zero location fix.
+     * cycle reads every key via getValue; a key that fails/times out this cycle (e.g.
+     * AircraftLocation indoors with no GPS lock, or any key on a momentarily busy link)
+     * CARRIES FORWARD the last known-good value for that field rather than collapsing to a
+     * hardcoded default. This matters because SafetyLimits reads this data as ground truth —
+     * a fabricated 0 read as real telemetry, not "unknown," previously fired a false
+     * EmergencyStop("Battery critical (0%)") off a single missed poll on a battery that was
+     * nowhere near critical (verified on-device 2026-07-23, mid real flight). Seeded with
+     * batteryPercent=100 so a failed FIRST-ever read (before any real value has arrived)
+     * can't falsely trigger CRITICAL either; every other field seeds at a neutral 0/false
+     * since FlightStateMachine already refuses to command on a stale/zero location fix and
+     * nothing else escalates safety state off them at zero.
      */
     val telemetryFlow: Flow<AircraftTelemetry> = flow {
+        var last = AircraftTelemetry(
+            latitude = 0.0,
+            longitude = 0.0,
+            altitudeMeters = 0.0,
+            velocityXMetersPerSecond = 0.0,
+            velocityYMetersPerSecond = 0.0,
+            velocityZMetersPerSecond = 0.0,
+            headingDegrees = 0.0,
+            batteryPercent = 100,
+            isFlying = false,
+        )
         while (true) {
             val location = getValueAsync(FlightControllerKey.KeyAircraftLocation)
             val altitude = getValueAsync(FlightControllerKey.KeyAltitude)
@@ -81,19 +99,18 @@ class AircraftConnectionRepository {
             val heading = getValueAsync(FlightControllerKey.KeyCompassHeading)
             val batteryPercent = getValueAsync(BatteryKey.KeyChargeRemainingInPercent)
             val isFlying = getValueAsync(FlightControllerKey.KeyIsFlying)
-            emit(
-                AircraftTelemetry(
-                    latitude = location?.latitude ?: 0.0,
-                    longitude = location?.longitude ?: 0.0,
-                    altitudeMeters = altitude ?: 0.0,
-                    velocityXMetersPerSecond = velocity?.x ?: 0.0,
-                    velocityYMetersPerSecond = velocity?.y ?: 0.0,
-                    velocityZMetersPerSecond = velocity?.z ?: 0.0,
-                    headingDegrees = heading ?: 0.0,
-                    batteryPercent = batteryPercent ?: 0,
-                    isFlying = isFlying ?: false,
-                ),
+            last = AircraftTelemetry(
+                latitude = location?.latitude ?: last.latitude,
+                longitude = location?.longitude ?: last.longitude,
+                altitudeMeters = altitude ?: last.altitudeMeters,
+                velocityXMetersPerSecond = velocity?.x ?: last.velocityXMetersPerSecond,
+                velocityYMetersPerSecond = velocity?.y ?: last.velocityYMetersPerSecond,
+                velocityZMetersPerSecond = velocity?.z ?: last.velocityZMetersPerSecond,
+                headingDegrees = heading ?: last.headingDegrees,
+                batteryPercent = batteryPercent ?: last.batteryPercent,
+                isFlying = isFlying ?: last.isFlying,
             )
+            emit(last)
             delay(POLL_INTERVAL_MS)
         }
     }

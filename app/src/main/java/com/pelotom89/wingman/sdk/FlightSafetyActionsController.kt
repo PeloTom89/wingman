@@ -21,4 +21,13 @@ class FlightSafetyActionsController {
     fun startAutoLanding() {
         KeyManager.getInstance().performAction(KeyTools.createKey(FlightControllerKey.KeyStartAutoLanding), EmptyMsg(), null)
     }
+
+    /** DJI's own autonomous takeoff: arms, climbs, and auto-hovers at DJI's fixed default
+     *  height (~1.2m) using the flight controller's own GPS-or-vision position hold — no
+     *  height parameter exists on this key (verified via javap against the real 5.17.0 jar).
+     *  Works indoors on vision positioning the same way DJI Fly/Maven/etc. do; nothing here
+     *  requires GPS. */
+    fun startTakeoff() {
+        KeyManager.getInstance().performAction(KeyTools.createKey(FlightControllerKey.KeyStartTakeoff), EmptyMsg(), null)
+    }
 }

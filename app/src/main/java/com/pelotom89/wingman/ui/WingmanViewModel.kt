@@ -184,6 +184,21 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         gimbalController.rotateTo(pitch, 0.0)
     }
 
+    /** Indoor/outdoor command-path test: DJI's own autonomous takeoff (see
+     *  FlightSafetyActionsController.startTakeoff) -- deliberately NOT routed through
+     *  VirtualStickController, since GPS-only following itself hasn't been flight-tested
+     *  yet and this is meant to be the lowest-risk way to confirm the aircraft actually
+     *  flies on command. */
+    fun onTestTakeoffPressed() {
+        Log.i("WingmanUI", "onTestTakeoffPressed")
+        flightSafetyActionsController.startTakeoff()
+    }
+
+    fun onTestLandPressed() {
+        Log.i("WingmanUI", "onTestLandPressed")
+        flightSafetyActionsController.startAutoLanding()
+    }
+
     fun onManualOverridePressed() {
         Log.i("WingmanUI", "onManualOverridePressed called")
         manualOverrideGate.trip()

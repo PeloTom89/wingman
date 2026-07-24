@@ -6,12 +6,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +89,23 @@ class MainActivity : ComponentActivity() {
                                 onClick = { viewModel.onTestGimbalPressed() },
                                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                             ) { Text("Test gimbal (tilt camera)") }
+                            // Real-flight command test: DJI's own autonomous takeoff/landing
+                            // (KeyStartTakeoff/KeyStartAutoLanding), not VirtualStick -- see
+                            // WingmanViewModel.onTestTakeoffPressed. Works indoors on vision
+                            // positioning the same way DJI Fly does.
+                            Row(
+                                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Button(
+                                    onClick = { viewModel.onTestTakeoffPressed() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                ) { Text("Takeoff") }
+                                Button(
+                                    onClick = { viewModel.onTestLandPressed() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                                ) { Text("Land") }
+                            }
                         }
                         Screen.FLIGHT -> {
                             // CameraPreviewScreen is composed ONLY here, on the flight screen,
