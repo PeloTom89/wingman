@@ -266,8 +266,17 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         )
         // Log only the zero<->non-zero transition (a drag fires this many times/second) --
         // enough to confirm on-device whether stick input is producing real commands at all,
-        // without flooding the buffer the way an unconditional per-call log would.
-        val isZero = clamped == VirtualStickCommand.ZERO
+        // without flooding the buffer the way an unconditional per-call log would. Epsilon
+        // check, not `== VirtualStickCommand.ZERO`: a released stick can settle on -0.0
+        // (e.g. -0f * scale), and data-class equality on Double doesn't treat -0.0 as equal
+        // to 0.0 -- that silently wedged this dedup "stuck non-zero" after the first real
+        // drag in an on-device test (2026-07-23), hiding every log line after it.
+        val isZero = listOf(
+            clamped.pitchMetersPerSecond,
+            clamped.rollMetersPerSecond,
+            clamped.yawDegreesPerSecond,
+            clamped.verticalMetersPerSecond,
+        ).all { kotlin.math.abs(it) < 1e-6 }
         if (isZero != lastManualCommandWasZero) {
             Log.i("WingmanUI", "onManualStickChanged -> $clamped")
             lastManualCommandWasZero = isZero
