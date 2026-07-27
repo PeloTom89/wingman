@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -49,10 +50,13 @@ private const val EMERGENCY_LANDING_CONFIRM_TIMEOUT_MS = 30_000L
  *  after the fact without bloating the file. */
 private const val FLIGHT_LOG_INTERVAL_MS = 200L
 
-/** Exponential-smoothing factor for the gimbal pitch target (0..1; lower = smoother/laggier).
- *  0.25 at the ~5Hz tick rate ≈ a 0.7s time constant -- smooths GPS-driven jitter without
- *  visibly trailing the subject. */
-private const val GIMBAL_SMOOTHING_ALPHA = 0.25
+/** Gimbal tracking control loop (velocity P-controller -- see GimbalController). All tunable
+ *  by feel on the next flight; conservative first values. */
+private const val GIMBAL_LOOP_INTERVAL_MS = 100L        // 10Hz control/read rate
+private const val GIMBAL_SMOOTHING_ALPHA = 0.3          // low-pass on the (noisy GPS) target pitch
+private const val GIMBAL_PITCH_KP = 3.0                 // deg/s of gimbal speed per deg of error
+private const val GIMBAL_MAX_PITCH_SPEED_DEG_S = 25.0   // cap slew rate -- smooth, not frantic
+private const val GIMBAL_PITCH_DEADBAND_DEG = 1.0       // within this, hold (let it stabilize)
 
 /** Cadence/bound for the read-only FC probe while waiting (see
  *  AircraftConnectionRepository.probeFlightControllerLink for what it can and can't do). */
@@ -188,23 +192,40 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         // class as the VirtualStick fix: sending ANY aircraft actuation command before/during
         // the connection handshake appears to disrupt it (aircraft LEDs going to error state
         // while Wingman runs, where competitor apps that send nothing pre-flight connect fine).
-        viewModelScope.launch {
-            // Low-pass the gimbal target before sending. The raw pitch is derived from GPS
-            // altitude + horizontal distance (computeGimbalPitchDegrees), both noisy at the
-            // 5Hz tick rate, so feeding it straight to rotateTo made the gimbal visibly jumpy
-            // in flight (2026-07-27). Exponential smoothing (alpha ~0.25 -> ~0.7s time
-            // constant) removes the jitter while still tracking the subject; reset to null
-            // when not following so re-entering Following initializes to the current target
-            // instead of sweeping from a stale value.
-            var smoothedPitch: Double? = null
-            flightStateMachine.gimbalPitchDegreesFlow.collect { target ->
+        // Gimbal tracking is a VELOCITY control loop, not repeated absolute-angle moves (which
+        // were jumpy and fought the gimbal's stabilization -- see GimbalController's header).
+        // On its own Dispatchers.Default thread so its getValue reads / performActions don't
+        // sit on the main thread. Each tick (while Following): smooth the target pitch, read
+        // the current pitch, and command a proportional angular velocity toward it -- with a
+        // deadband so it holds (and the gimbal stabilizes) once framed. Gated on Following so
+        // no gimbal command ever fires pre-connection (same rule as VirtualStick/camera).
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            var smoothedTarget: Double? = null
+            var commanding = false
+            while (isActive) {
                 if (flightStateMachine.flightStateFlow.value is FlightState.Following) {
-                    val next = smoothedPitch?.let { it + GIMBAL_SMOOTHING_ALPHA * (target - it) } ?: target
-                    smoothedPitch = next
-                    gimbalController.rotateTo(next, 0.0)
+                    val raw = flightStateMachine.gimbalPitchDegreesFlow.value
+                    val target = smoothedTarget?.let { it + GIMBAL_SMOOTHING_ALPHA * (raw - it) } ?: raw
+                    smoothedTarget = target
+                    val current = gimbalController.currentPitchDegrees()
+                    if (current != null) {
+                        val error = target - current
+                        val speed = if (kotlin.math.abs(error) < GIMBAL_PITCH_DEADBAND_DEG) {
+                            0.0
+                        } else {
+                            (GIMBAL_PITCH_KP * error).coerceIn(-GIMBAL_MAX_PITCH_SPEED_DEG_S, GIMBAL_MAX_PITCH_SPEED_DEG_S)
+                        }
+                        gimbalController.setPitchSpeed(speed)
+                        commanding = true
+                    }
                 } else {
-                    smoothedPitch = null
+                    if (commanding) {
+                        gimbalController.setPitchSpeed(0.0) // stop slewing when following ends
+                        commanding = false
+                    }
+                    smoothedTarget = null
                 }
+                delay(GIMBAL_LOOP_INTERVAL_MS)
             }
         }
         // Fires once per transition INTO a new state class (distinctUntilChangedBy keys
