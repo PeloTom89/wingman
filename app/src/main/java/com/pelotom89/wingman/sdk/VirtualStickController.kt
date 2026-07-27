@@ -204,9 +204,19 @@ class VirtualStickController(
     }
 
     private companion object {
-        /** Mid-range of DJI's documented 5-25Hz window; fast enough for smooth following,
-         *  slow enough to leave headroom on a phone also running live video + inference. */
-        const val COMMAND_INTERVAL_MS = 100L
+        /** 20Hz. Raised from 100ms/10Hz (2026-07-27) after a flight test confirmed the app's
+         *  command output was already clean and steady -- one continuous 6.6s stick hold, a
+         *  rock-steady velocity command reaching ~3 m/s, and zero behind-schedule warnings --
+         *  yet the aircraft still "rocked back and forth" and wouldn't fly continuously. With
+         *  the command stream ruled out as the cause, the remaining suspect is the aircraft
+         *  reverting to hover between commands: DJI's advanced-mode params are single-use with
+         *  a ~200ms revert timeout, and although our SEND cadence is a steady 100ms, arrival
+         *  at the aircraft over the RC-N3 radio link has jitter -- an occasional gap past
+         *  200ms makes the aircraft brake to hover, then the next command surges it again,
+         *  which reads as the observed rocking. 50ms gives 4x margin against the revert
+         *  timeout instead of 10Hz's 2x, at 2.5x the JNI call rate (fine on Dispatchers.Default).
+         *  Still well within DJI's documented 5-25Hz window. */
+        const val COMMAND_INTERVAL_MS = 50L
     }
 }
 
