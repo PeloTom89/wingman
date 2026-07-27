@@ -214,7 +214,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.align(Alignment.BottomStart),
                             )
                             ManualOverrideButton(
-                                onPressed = { viewModel.onManualOverridePressed() },
+                                onPressed = { viewModel.onStopPressed() },
                                 modifier = Modifier.align(Alignment.BottomEnd),
                             )
                         }
@@ -225,33 +225,24 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Manual-flight enable toggle + STOP/Resume, shared by the video-test and flight screens.
- *  STOP/Resume route to the same ManualOverrideGate as the flight screen's big override
- *  button -- an immediate, no-confirmation zero + clear for a runaway stick. */
+/** Manual-flight enable toggle, shared by the video-test and flight screens. Toggling on
+ *  enables VirtualStick (ANGLE roll/pitch) and shows the joysticks; off releases VirtualStick
+ *  so the RC flies. The old STOP/Resume sub-buttons were removed -- STOP is the flight
+ *  screen's dedicated button now, and it fully stops+releases rather than latching an
+ *  override the joysticks then had to fight. */
 @Composable
 private fun ManualControlBar(
     viewModel: WingmanViewModel,
     manualFlightActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(
-            onClick = { viewModel.onManualFlightToggled(!manualFlightActive) },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (manualFlightActive) Color(0xFF2E7D32) else Color.DarkGray,
-            ),
-        ) { Text(if (manualFlightActive) "Manual control: ON" else "Enable manual control") }
-        if (manualFlightActive) {
-            Button(
-                onClick = { viewModel.onManualOverridePressed() },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-            ) { Text("STOP") }
-            Button(
-                onClick = { viewModel.onManualOverrideCleared() },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-            ) { Text("Resume") }
-        }
-    }
+    Button(
+        onClick = { viewModel.onManualFlightToggled(!manualFlightActive) },
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (manualFlightActive) Color(0xFF2E7D32) else Color.DarkGray,
+        ),
+    ) { Text(if (manualFlightActive) "Manual control: ON" else "Enable manual control") }
 }
 
 /** The two manual-flight joysticks (Mode-2 RC layout), shared by the video-test and flight

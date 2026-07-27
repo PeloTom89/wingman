@@ -43,6 +43,21 @@ class FlightCommandCalculatorTest {
     }
 
     @Test
+    fun `explicit target distance overrides the default standoff`() {
+        // At ~22m north with a 20m target, the drone should hold still (within tolerance) --
+        // whereas the default 10m target would command a strong approach. Proves the
+        // captured-at-follow-start distance actually drives the controller.
+        val command = calculator.computeFollowCommand(
+            aircraft = aircraft,
+            aircraftHeadingDegrees = 0.0,
+            subject = subjectNorth,
+            targetDistanceMeters = 22.0,
+        )
+
+        assertEquals(0.0, command.pitchMetersPerSecond, 0.001)
+    }
+
+    @Test
     fun `holds still within the distance tolerance band`() {
         val withinTolerance = LatLon(37.000081, -122.0) // ~9m north, inside 10m +/- 2m band
 

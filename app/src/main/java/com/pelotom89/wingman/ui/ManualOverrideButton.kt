@@ -12,10 +12,9 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Always rendered on top, single tap, no confirmation dialog — per the plan, a
- * confirmation step on a stop control is actively dangerous. Every press routes straight
- * to ManualOverrideGate.trip(), which zeros the very next VirtualStick command out of band
- * (see flightcontrol/ManualOverrideGate.kt) rather than waiting on this composable's own
- * recomposition.
+ * confirmation step on a stop control is actively dangerous. Wired to
+ * WingmanViewModel.onStopPressed: exits following and releases VirtualStick so the aircraft
+ * hovers and the RC (or, after re-enabling manual, the virtual sticks) can fly it.
  */
 @Composable
 fun ManualOverrideButton(onPressed: () -> Unit, modifier: Modifier = Modifier) {
@@ -26,6 +25,6 @@ fun ManualOverrideButton(onPressed: () -> Unit, modifier: Modifier = Modifier) {
             .size(width = 160.dp, height = 64.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
     ) {
-        Text("STOP / MANUAL", color = Color.White)
+        Text("STOP", color = Color.White)
     }
 }

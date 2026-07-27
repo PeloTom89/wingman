@@ -52,15 +52,32 @@ class FlightStateMachine(
 
     private var launchPoint: LatLon? = null
 
+    /** The standoff distance following holds. Captured from the actual drone-subject distance
+     *  on the first Following tick (see [captureFollowTargetOnNextFix]) so the aircraft holds
+     *  wherever the operator positioned it, not a fixed default. */
+    private var followTargetDistanceMeters: Double = DEFAULT_FOLLOW_TARGET_DISTANCE_METERS
+    private var captureFollowTargetOnNextFix = false
+
     /** Called once, at takeoff — anchors the geofence check in [SafetyLimits]. */
     fun armLaunchPoint(point: LatLon) {
         launchPoint = point
     }
 
-    /** Operator action: begin GPS following once armed. */
+    /** Operator action: begin GPS following once armed. Captures the current standoff
+     *  distance on the next valid tick (operator positioned the drone where they want it). */
     fun startFollowing() {
         if (_flightStateFlow.value == FlightState.Idle) {
+            captureFollowTargetOnNextFix = true
             _flightStateFlow.value = FlightState.Following
+        }
+    }
+
+    /** Operator action (STOP): leave Following and hold. The aircraft-command side of the
+     *  stop -- releasing VirtualStick so the RC/virtual sticks can fly -- is handled in
+     *  WingmanViewModel.onStopPressed; this just exits the follow policy. */
+    fun stopFollowing() {
+        if (_flightStateFlow.value is FlightState.Following) {
+            _flightStateFlow.value = FlightState.Idle
         }
     }
 
@@ -142,14 +159,23 @@ class FlightStateMachine(
             proposedCommand = VirtualStickCommand.ZERO
         } else {
             val aircraft = LatLon(tick.telemetry.latitude, tick.telemetry.longitude)
+            val distanceToSubject = haversineMeters(aircraft, fix.position)
+            // Capture the standoff on the first valid Following tick -- hold wherever the
+            // operator placed the drone. Floored so following can never target a collision
+            // course even if the operator started it very close.
+            if (captureFollowTargetOnNextFix) {
+                followTargetDistanceMeters = distanceToSubject.coerceAtLeast(MIN_FOLLOW_TARGET_DISTANCE_METERS)
+                captureFollowTargetOnNextFix = false
+            }
             proposedCommand = commandCalculator.computeFollowCommand(
                 aircraft = aircraft,
                 aircraftHeadingDegrees = tick.telemetry.headingDegrees,
                 subject = fix.position,
+                targetDistanceMeters = followTargetDistanceMeters,
             )
             _gimbalPitchDegreesFlow.value = computeGimbalPitchDegrees(
                 altitudeAglMeters = tick.telemetry.altitudeMeters,
-                horizontalDistanceMeters = haversineMeters(aircraft, fix.position),
+                horizontalDistanceMeters = distanceToSubject,
             )
         }
 
@@ -169,4 +195,14 @@ class FlightStateMachine(
         val locationFix: LocationFix?,
         val overrideActive: Boolean,
     )
+
+    private companion object {
+        /** Fallback standoff before a real one is captured at follow-start. */
+        const val DEFAULT_FOLLOW_TARGET_DISTANCE_METERS = 10.0
+
+        /** Floor for the captured standoff -- following never targets closer than this even
+         *  if the operator starts follow with the drone right next to them, so it can't be
+         *  commanded onto a collision course with the subject. */
+        const val MIN_FOLLOW_TARGET_DISTANCE_METERS = 3.0
+    }
 }

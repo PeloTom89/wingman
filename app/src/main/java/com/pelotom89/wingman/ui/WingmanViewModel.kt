@@ -349,12 +349,21 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
 
     private var lastManualCommandWasZero = true
 
-    fun onManualOverridePressed() {
-        Log.i("WingmanUI", "onManualOverridePressed called")
-        manualOverrideGate.trip()
+    /** STOP: exit following AND release VirtualStick, so the aircraft just hovers and BOTH
+     *  the physical RC sticks and (after re-enabling manual) the virtual sticks can fly it.
+     *  This replaced a ManualOverrideGate.trip() that latched a persistent "override active"
+     *  state which zeroed ALL VirtualStick output including manual -- so after STOP the
+     *  virtual sticks did nothing until a separate Resume, which the operator (rightly) found
+     *  confusing. Releasing VirtualStick instead hands authority straight back to the RC. */
+    fun onStopPressed() {
+        Log.i("WingmanUI", "onStopPressed")
+        flightStateMachine.stopFollowing()
+        manualFlightActiveHolder.value = false
+        manualStickCommandHolder.value = VirtualStickCommand.ZERO
+        virtualStickController.emergencyZero()
+        virtualStickController.stop()
+        virtualStickController.setRollPitchAngleMode(false)
     }
-
-    fun onManualOverrideCleared() = manualOverrideGate.clear()
 
     /** Operator action (a button in MainActivity's flight screen, replacing the old
      *  tap-to-select-a-subject gesture) — the subject is always "whoever is carrying this

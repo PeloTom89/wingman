@@ -39,6 +39,12 @@ class FlightCommandCalculator(
         aircraft: LatLon,
         aircraftHeadingDegrees: Double,
         subject: LatLon,
+        // The standoff distance to hold. FlightStateMachine captures the ACTUAL drone-subject
+        // distance at the moment following starts and passes it here, so the aircraft holds
+        // wherever the operator placed it rather than a fixed default (2026-07-27 -- 10m felt
+        // too far in the first successful outdoor follow). Defaults to the constructor value
+        // for tests / callers that don't capture one.
+        targetDistanceMeters: Double = this.targetDistanceMeters,
     ): VirtualStickCommand {
         val distanceMeters = haversineMeters(aircraft, subject)
         val targetBearing = bearingDegrees(aircraft, subject)
