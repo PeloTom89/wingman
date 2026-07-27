@@ -281,25 +281,30 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         Log.i("WingmanUI", "onManualFlightToggled($enabled)")
         manualFlightActiveHolder.value = enabled
         if (enabled) {
+            // Manual flight uses ANGLE (direct tilt) roll/pitch -- set BEFORE start() so the
+            // loop's first send already uses it. See VirtualStickController.rollPitchAngleMode.
+            virtualStickController.setRollPitchAngleMode(true)
             virtualStickController.start(viewModelScope)
         } else {
             manualStickCommandHolder.value = VirtualStickCommand.ZERO
             virtualStickController.stop()
+            virtualStickController.setRollPitchAngleMode(false)
         }
     }
 
-    /** Joystick input, already in the app's body-frame convention (pitch+/roll+/yaw+/vertical+
-     *  = forward/right/clockwise/up). Run through the same SafetyLimits.clampSpeed every
-     *  Following command gets -- manual flight bypasses FlightStateMachine (see
-     *  manualFlightActiveHolder's comment above), so this is the one place left responsible
-     *  for enforcing it, yaw rate included. */
+    /** Joystick input. Manual flight runs roll/pitch in ANGLE mode, so pitch/roll here are
+     *  TILT DEGREES (yaw is deg/s, vertical m/s) -- MainActivity scales the normalized stick
+     *  by SafetyLimits.maxManualTiltDegrees. Clamped via clampManualAngle (per-axis, angle
+     *  units), not clampSpeed (m/s vector) -- manual flight bypasses FlightStateMachine (see
+     *  manualFlightActiveHolder's comment above), so this is the one place enforcing manual
+     *  limits. */
     fun onManualStickChanged(
         pitchMetersPerSecond: Double,
         rollMetersPerSecond: Double,
         yawDegreesPerSecond: Double,
         verticalMetersPerSecond: Double,
     ) {
-        val clamped = safetyLimits.clampSpeed(
+        val clamped = safetyLimits.clampManualAngle(
             VirtualStickCommand(
                 pitchMetersPerSecond = pitchMetersPerSecond,
                 rollMetersPerSecond = rollMetersPerSecond,
@@ -347,6 +352,9 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         // actively starting autonomous flight -- never before (see the note in init on why
         // starting it at launch broke the connection). The button that calls this is gated
         // on FlightState.Idle, so this fires once per flight.
+        // GPS-following uses VELOCITY roll/pitch (FlightCommandCalculator outputs ground
+        // speeds); set it explicitly in case a manual session left ANGLE mode on.
+        virtualStickController.setRollPitchAngleMode(false)
         virtualStickController.start(viewModelScope)
         flightStateMachine.startFollowing()
     }

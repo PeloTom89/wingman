@@ -12,6 +12,7 @@ class SafetyLimitsTest {
         maxHorizontalSpeedMetersPerSecond = 3.0,
         maxVerticalSpeedMetersPerSecond = 1.5,
         maxYawDegreesPerSecond = 60.0,
+        maxManualTiltDegrees = 20.0,
         maxAltitudeMetersAgl = 8.0,
         geofenceRadiusMeters = 100.0,
         batteryRthTriggerPercent = 30,
@@ -43,6 +44,38 @@ class SafetyLimitsTest {
 
         val clamped = limits.clampSpeed(command)
 
+        assertEquals(1.5, clamped.verticalMetersPerSecond, 0.0001)
+    }
+
+    @Test
+    fun `manual angle clamp caps tilt per-axis without vector-scaling`() {
+        // In the manual path pitch/roll are tilt DEGREES; each axis is coerced independently
+        // (not scaled as a vector like clampSpeed), so a full-tilt diagonal stays full on both.
+        val command = VirtualStickCommand(
+            pitchMetersPerSecond = 35.0,
+            rollMetersPerSecond = -35.0,
+            yawDegreesPerSecond = 0.0,
+            verticalMetersPerSecond = 0.0,
+        )
+
+        val clamped = limits.clampManualAngle(command)
+
+        assertEquals(20.0, clamped.pitchMetersPerSecond, 0.0001)
+        assertEquals(-20.0, clamped.rollMetersPerSecond, 0.0001)
+    }
+
+    @Test
+    fun `manual angle clamp still bounds yaw and vertical`() {
+        val command = VirtualStickCommand(
+            pitchMetersPerSecond = 0.0,
+            rollMetersPerSecond = 0.0,
+            yawDegreesPerSecond = 200.0,
+            verticalMetersPerSecond = 5.0,
+        )
+
+        val clamped = limits.clampManualAngle(command)
+
+        assertEquals(60.0, clamped.yawDegreesPerSecond, 0.0001)
         assertEquals(1.5, clamped.verticalMetersPerSecond, 0.0001)
     }
 

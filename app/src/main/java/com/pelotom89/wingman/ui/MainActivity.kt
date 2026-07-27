@@ -185,9 +185,12 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                     // Right stick: forward/back (pitch) + strafe left/right (roll).
+                                    // Manual flight runs roll/pitch in ANGLE mode, so scale the
+                                    // normalized deflection to TILT DEGREES, not m/s -- see
+                                    // VirtualStickController.rollPitchAngleMode.
                                     Joystick(size = 140.dp) { x, y ->
-                                        val maxHorizontal = JOYSTICK_SAFETY_LIMITS.maxHorizontalSpeedMetersPerSecond.toFloat()
-                                        stickPitchRoll = Offset(x = x * maxHorizontal, y = -y * maxHorizontal)
+                                        val maxTilt = JOYSTICK_SAFETY_LIMITS.maxManualTiltDegrees.toFloat()
+                                        stickPitchRoll = Offset(x = x * maxTilt, y = -y * maxTilt)
                                         viewModel.onManualStickChanged(
                                             pitchMetersPerSecond = stickPitchRoll.y.toDouble(),
                                             rollMetersPerSecond = stickPitchRoll.x.toDouble(),

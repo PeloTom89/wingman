@@ -20,6 +20,11 @@ data class SafetyLimits(
     val maxHorizontalSpeedMetersPerSecond: Double = 3.0,
     val maxVerticalSpeedMetersPerSecond: Double = 1.5,
     val maxYawDegreesPerSecond: Double = 60.0,
+    /** Max roll/pitch tilt for MANUAL joystick flight, which uses DJI's ANGLE control mode
+     *  (direct tilt) rather than VELOCITY -- see VirtualStickController. Conservative: DJI's
+     *  own normal-mode max is ~25-30 deg; this caps manual aggressiveness below that. Only
+     *  applies to the manual path (clampManualAngle); GPS-following uses clampSpeed/velocity. */
+    val maxManualTiltDegrees: Double = 20.0,
     val maxAltitudeMetersAgl: Double = 8.0,
     val geofenceRadiusMeters: Double = 100.0,
     val batteryRthTriggerPercent: Int = 30,
@@ -39,6 +44,20 @@ data class SafetyLimits(
                 .coerceIn(-maxVerticalSpeedMetersPerSecond, maxVerticalSpeedMetersPerSecond),
         )
     }
+
+    /** Clamp for the MANUAL joystick path, which runs roll/pitch in DJI ANGLE mode. In this
+     *  path the command's pitch/roll fields carry TILT DEGREES, not m/s (the field names are
+     *  historical -- the unit is determined by the active RollPitchControlMode in
+     *  VirtualStickController). Yaw (deg/s) and vertical (m/s) keep their normal meaning and
+     *  limits, since those axes stay on their existing control modes. Per-axis coerce rather
+     *  than clampSpeed's vector-scale, since tilt isn't a speed vector. */
+    fun clampManualAngle(command: com.pelotom89.wingman.sdk.VirtualStickCommand): com.pelotom89.wingman.sdk.VirtualStickCommand =
+        command.copy(
+            pitchMetersPerSecond = command.pitchMetersPerSecond.coerceIn(-maxManualTiltDegrees, maxManualTiltDegrees),
+            rollMetersPerSecond = command.rollMetersPerSecond.coerceIn(-maxManualTiltDegrees, maxManualTiltDegrees),
+            yawDegreesPerSecond = command.yawDegreesPerSecond.coerceIn(-maxYawDegreesPerSecond, maxYawDegreesPerSecond),
+            verticalMetersPerSecond = command.verticalMetersPerSecond.coerceIn(-maxVerticalSpeedMetersPerSecond, maxVerticalSpeedMetersPerSecond),
+        )
 
     fun isAltitudeExceeded(altitudeMetersAgl: Double): Boolean = altitudeMetersAgl > maxAltitudeMetersAgl
 

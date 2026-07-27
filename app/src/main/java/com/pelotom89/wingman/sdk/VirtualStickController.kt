@@ -48,6 +48,29 @@ class VirtualStickController(
 ) {
     private var loopJob: Job? = null
 
+    /** When true, roll/pitch are sent in DJI ANGLE mode (direct tilt) instead of VELOCITY.
+     *  Set true for MANUAL joystick flight and false for GPS-following. Rationale (confirmed
+     *  by a real flight test 2026-07-27): VELOCITY mode runs a closed velocity-tracking loop
+     *  on the aircraft against its horizontal velocity ESTIMATE, which indoors comes from
+     *  noisy downward-vision optical flow while the vision system is also holding position --
+     *  the two fight and the aircraft rocks/surges on a steady stick. ANGLE mode commands
+     *  tilt directly with no such loop, matching how the physical RC sticks feel, and doesn't
+     *  oscillate. Yaw (angular-rate) and vertical (velocity) were already smooth in the same
+     *  test, so only roll/pitch's mode changes. GPS-following stays VELOCITY: it's naturally
+     *  expressed as ground speeds to hold a standoff distance, and velocity mode behaves well
+     *  outdoors where the GPS velocity estimate is clean. @Volatile: read on the command
+     *  loop's Dispatchers.Default thread, written from the main thread. */
+    @Volatile
+    private var rollPitchAngleMode = false
+
+    /** Select ANGLE (manual) vs VELOCITY (GPS-following) roll/pitch mode. Set BEFORE start()
+     *  so the first command the loop sends already uses the right mode -- manual and
+     *  following are mutually exclusive, so a single flag is sufficient. */
+    fun setRollPitchAngleMode(enabled: Boolean) {
+        Log.i(TAG, "setRollPitchAngleMode($enabled)")
+        rollPitchAngleMode = enabled
+    }
+
     init {
         // Previously enableVirtualStick(null)/disableVirtualStick(null) passed no callback,
         // so a joystick session that silently failed to engage (or never actually held
@@ -186,7 +209,12 @@ class VirtualStickController(
             roll = command.pitchMetersPerSecond
             yaw = command.yawDegreesPerSecond
             verticalThrottle = command.verticalMetersPerSecond
-            rollPitchControlMode = RollPitchControlMode.VELOCITY
+            // ANGLE for manual (direct tilt, no oscillating velocity loop), VELOCITY for
+            // GPS-following -- see rollPitchAngleMode's comment. In ANGLE mode the pitch/roll
+            // values above are tilt DEGREES (scaled/clamped as such upstream); in VELOCITY
+            // mode they're m/s. Only this axis-pair's mode is conditional -- yaw and vertical
+            // are unchanged (both were already smooth on-device).
+            rollPitchControlMode = if (rollPitchAngleMode) RollPitchControlMode.ANGLE else RollPitchControlMode.VELOCITY
             yawControlMode = YawControlMode.ANGULAR_VELOCITY
             verticalControlMode = VerticalControlMode.VELOCITY
             // MISSING FIELD, found via javap against the real 5.17.0 jar (2026-07-23): this
@@ -220,7 +248,14 @@ class VirtualStickController(
     }
 }
 
-/** App-owned command model so flightcontrol/ never constructs a DJI param type directly. */
+/** App-owned command model so flightcontrol/ never constructs a DJI param type directly.
+ *
+ *  UNIT NOTE: pitch/roll are m/s in the GPS-following (VELOCITY) path, but TILT DEGREES in
+ *  the manual (ANGLE) path -- the interpretation follows VirtualStickController's active
+ *  rollPitchAngleMode, not the field names (which are historical). yaw is always deg/s and
+ *  vertical always m/s. Producers (FlightCommandCalculator for following,
+ *  WingmanViewModel.onManualStickChanged for manual) each supply the unit matching the mode
+ *  they run in, so nothing mixes the two. */
 data class VirtualStickCommand(
     val pitchMetersPerSecond: Double,
     val rollMetersPerSecond: Double,
