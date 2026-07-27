@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -15,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
@@ -65,6 +67,8 @@ class MainActivity : ComponentActivity() {
                 val aircraftLinkStalled by viewModel.aircraftLinkStalled.collectAsStateWithLifecycle()
                 val flightState by viewModel.flightState.collectAsStateWithLifecycle()
                 val telemetry by viewModel.telemetry.collectAsStateWithLifecycle()
+                val landingConfirmationNeeded by viewModel.landingConfirmationNeeded.collectAsStateWithLifecycle()
+                val manualFlightActive by viewModel.manualFlightActive.collectAsStateWithLifecycle()
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     when (screen) {
@@ -83,12 +87,6 @@ class MainActivity : ComponentActivity() {
                         // just an unreliable signal -- meaning the "not connected" state is a
                         // gating bug, not a real connection failure. Tap anywhere to go back.
                         Screen.VIDEO_TEST -> Box(modifier = Modifier.fillMaxSize()) {
-                            val manualFlightActive by viewModel.manualFlightActive.collectAsStateWithLifecycle()
-                            val landingConfirmationNeeded by viewModel.landingConfirmationNeeded.collectAsStateWithLifecycle()
-                            var stickPitchRoll by remember { mutableStateOf(Offset.Zero) }
-                            var stickYaw by remember { mutableStateOf(0f) }
-                            var stickVertical by remember { mutableStateOf(0f) }
-
                             CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
                             HudOverlay(flightState = flightState, telemetry = telemetry)
                             Button(
@@ -140,66 +138,12 @@ class MainActivity : ComponentActivity() {
                                     ) { Text("Cancel Landing") }
                                 }
                             }
-                            // Manual joystick flight test -- see WingmanViewModel's
-                            // manualFlightActiveHolder comment. STOP/Resume mirror the flight
-                            // screen's ManualOverrideButton/clear so a runaway stick has the
-                            // same immediate, no-confirmation escape hatch real flight does.
-                            Row(
+                            ManualControlBar(
+                                viewModel = viewModel,
+                                manualFlightActive = manualFlightActive,
                                 modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Button(
-                                    onClick = { viewModel.onManualFlightToggled(!manualFlightActive) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (manualFlightActive) Color(0xFF2E7D32) else Color.DarkGray,
-                                    ),
-                                ) { Text(if (manualFlightActive) "Manual control: ON" else "Enable manual control") }
-                                if (manualFlightActive) {
-                                    Button(
-                                        onClick = { viewModel.onManualOverridePressed() },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                                    ) { Text("STOP") }
-                                    Button(
-                                        onClick = { viewModel.onManualOverrideCleared() },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                                    ) { Text("Resume") }
-                                }
-                            }
-                            if (manualFlightActive) {
-                                Row(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .padding(bottom = 88.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(48.dp),
-                                ) {
-                                    // Left stick, Mode-2 RC convention: x = yaw (turn
-                                    // left/right), y = vertical (up/down).
-                                    Joystick(size = 120.dp) { x, y ->
-                                        stickYaw = x * JOYSTICK_SAFETY_LIMITS.maxYawDegreesPerSecond.toFloat()
-                                        stickVertical = -y * JOYSTICK_SAFETY_LIMITS.maxVerticalSpeedMetersPerSecond.toFloat()
-                                        viewModel.onManualStickChanged(
-                                            pitchMetersPerSecond = stickPitchRoll.y.toDouble(),
-                                            rollMetersPerSecond = stickPitchRoll.x.toDouble(),
-                                            yawDegreesPerSecond = stickYaw.toDouble(),
-                                            verticalMetersPerSecond = stickVertical.toDouble(),
-                                        )
-                                    }
-                                    // Right stick: forward/back (pitch) + strafe left/right (roll).
-                                    // Manual flight runs roll/pitch in ANGLE mode, so scale the
-                                    // normalized deflection to TILT DEGREES, not m/s -- see
-                                    // VirtualStickController.rollPitchAngleMode.
-                                    Joystick(size = 140.dp) { x, y ->
-                                        val maxTilt = JOYSTICK_SAFETY_LIMITS.maxManualTiltDegrees.toFloat()
-                                        stickPitchRoll = Offset(x = x * maxTilt, y = -y * maxTilt)
-                                        viewModel.onManualStickChanged(
-                                            pitchMetersPerSecond = stickPitchRoll.y.toDouble(),
-                                            rollMetersPerSecond = stickPitchRoll.x.toDouble(),
-                                            yawDegreesPerSecond = stickYaw.toDouble(),
-                                            verticalMetersPerSecond = stickVertical.toDouble(),
-                                        )
-                                    }
-                                }
-                            }
+                            )
+                            if (manualFlightActive) ManualJoysticks(viewModel)
                         }
                         Screen.FLIGHT -> {
                             // CameraPreviewScreen is composed ONLY here, on the flight screen,
@@ -216,6 +160,54 @@ class MainActivity : ComponentActivity() {
                             // partially registered (serial reads, but zero telemetry/KeyConnection).
                             CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
                             HudOverlay(flightState = flightState, telemetry = telemetry)
+                            // Flight controls, same as the test screen: take off, then CLIMB
+                            // (with the RC, or manual joysticks on the test screen) to a usable
+                            // following altitude -- the first outdoor follow test (2026-07-27)
+                            // failed only because the aircraft was stuck at ~1.1m, where
+                            // ground-proximity vision-hold prevents horizontal movement. Follow
+                            // itself worked (yawed to face the subject the whole time).
+                            Row(
+                                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Button(
+                                    onClick = { viewModel.onTestTakeoffPressed() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                ) { Text("Takeoff") }
+                                Button(
+                                    onClick = { viewModel.onTestLandPressed() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                                ) { Text("Land") }
+                            }
+                            Button(
+                                onClick = { screen = Screen.PREFLIGHT },
+                                modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+                            ) { Text("Back") }
+                            // Manual joysticks so the operator can take off + CLIMB to a usable
+                            // following altitude and position the aircraft BEFORE Start Following.
+                            // onStartFollowingPressed turns manual off first, so they don't
+                            // fight over the command stream.
+                            ManualControlBar(
+                                viewModel = viewModel,
+                                manualFlightActive = manualFlightActive,
+                                modifier = Modifier.align(Alignment.TopCenter).padding(16.dp),
+                            )
+                            if (manualFlightActive) ManualJoysticks(viewModel)
+                            if (landingConfirmationNeeded) {
+                                Row(
+                                    modifier = Modifier.align(Alignment.Center),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Button(
+                                        onClick = { viewModel.onConfirmLandingPressed() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                    ) { Text("Confirm Landing") }
+                                    Button(
+                                        onClick = { viewModel.onCancelLandingPressed() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                                    ) { Text("Cancel Landing") }
+                                }
+                            }
                             StartFollowingButton(
                                 flightState = flightState,
                                 onPressed = { viewModel.onStartFollowingPressed() },
@@ -229,6 +221,73 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+}
+
+/** Manual-flight enable toggle + STOP/Resume, shared by the video-test and flight screens.
+ *  STOP/Resume route to the same ManualOverrideGate as the flight screen's big override
+ *  button -- an immediate, no-confirmation zero + clear for a runaway stick. */
+@Composable
+private fun ManualControlBar(
+    viewModel: WingmanViewModel,
+    manualFlightActive: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            onClick = { viewModel.onManualFlightToggled(!manualFlightActive) },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (manualFlightActive) Color(0xFF2E7D32) else Color.DarkGray,
+            ),
+        ) { Text(if (manualFlightActive) "Manual control: ON" else "Enable manual control") }
+        if (manualFlightActive) {
+            Button(
+                onClick = { viewModel.onManualOverridePressed() },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+            ) { Text("STOP") }
+            Button(
+                onClick = { viewModel.onManualOverrideCleared() },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+            ) { Text("Resume") }
+        }
+    }
+}
+
+/** The two manual-flight joysticks (Mode-2 RC layout), shared by the video-test and flight
+ *  screens. Left = yaw (turn) + vertical (up/down); right = pitch/roll tilt (fwd/back +
+ *  strafe). Each instance owns its own transient stick state. Roll/pitch run in ANGLE mode
+ *  (tilt degrees) and yaw/vertical in their normal units -- see VirtualStickController. */
+@Composable
+private fun BoxScope.ManualJoysticks(viewModel: WingmanViewModel) {
+    var stickPitchRoll by remember { mutableStateOf(Offset.Zero) }
+    var stickYaw by remember { mutableStateOf(0f) }
+    var stickVertical by remember { mutableStateOf(0f) }
+    Row(
+        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp),
+        horizontalArrangement = Arrangement.spacedBy(48.dp),
+    ) {
+        // Left stick: x = yaw (turn left/right), y = vertical (up/down).
+        Joystick(size = 120.dp) { x, y ->
+            stickYaw = x * JOYSTICK_SAFETY_LIMITS.maxYawDegreesPerSecond.toFloat()
+            stickVertical = -y * JOYSTICK_SAFETY_LIMITS.maxVerticalSpeedMetersPerSecond.toFloat()
+            viewModel.onManualStickChanged(
+                pitchMetersPerSecond = stickPitchRoll.y.toDouble(),
+                rollMetersPerSecond = stickPitchRoll.x.toDouble(),
+                yawDegreesPerSecond = stickYaw.toDouble(),
+                verticalMetersPerSecond = stickVertical.toDouble(),
+            )
+        }
+        // Right stick: forward/back (pitch) + strafe (roll), scaled to TILT DEGREES (ANGLE mode).
+        Joystick(size = 140.dp) { x, y ->
+            val maxTilt = JOYSTICK_SAFETY_LIMITS.maxManualTiltDegrees.toFloat()
+            stickPitchRoll = Offset(x = x * maxTilt, y = -y * maxTilt)
+            viewModel.onManualStickChanged(
+                pitchMetersPerSecond = stickPitchRoll.y.toDouble(),
+                rollMetersPerSecond = stickPitchRoll.x.toDouble(),
+                yawDegreesPerSecond = stickYaw.toDouble(),
+                verticalMetersPerSecond = stickVertical.toDouble(),
+            )
         }
     }
 }

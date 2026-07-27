@@ -360,6 +360,12 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
      *  tap-to-select-a-subject gesture) — the subject is always "whoever is carrying this
      *  phone," so there's nothing to select, just a decision to start. */
     fun onStartFollowingPressed() {
+        // If the operator positioned with the app's manual joysticks, turn manual off first
+        // -- otherwise the combine keeps routing the (centered = zero) manual command instead
+        // of the follow command and the aircraft just sits there. Positioning with the
+        // physical RC sticks instead needs none of this: enableVirtualStick (in start below)
+        // takes authority from the RC directly.
+        if (manualFlightActiveHolder.value) onManualFlightToggled(false)
         flightStateMachine.armLaunchPoint(
             telemetry.value?.let { LatLon(it.latitude, it.longitude) } ?: return,
         )
