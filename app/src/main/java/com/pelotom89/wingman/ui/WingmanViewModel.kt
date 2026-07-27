@@ -30,13 +30,20 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** How long the FC link may stay down after ProductConnect before the UI calls it stalled
  *  (on healthy runs it was observed coming up within a few seconds of onProductConnect). */
 private const val FC_LINK_STALL_TIMEOUT_MS = 20_000L
+
+/** How long EmergencyStop's automatic landing waits for
+ *  AircraftConnectionRepository.landingConfirmationNeededFlow to actually report true before
+ *  confirming anyway as a fallback -- see FlightSafetyActionsController.confirmLanding(). */
+private const val EMERGENCY_LANDING_CONFIRM_TIMEOUT_MS = 30_000L
 
 /** Cadence/bound for the read-only FC probe while waiting (see
  *  AircraftConnectionRepository.probeFlightControllerLink for what it can and can't do). */
@@ -107,6 +114,12 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     val remoteControllerConnected: StateFlow<Boolean> = aircraftConnectionRepository.remoteControllerConnectedFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    /** True while autonomous landing is paused awaiting a confirm -- see
+     *  FlightSafetyActionsController.confirmLanding()'s header comment. Drives the "Confirm
+     *  Landing" button's visibility and is what EmergencyStop's auto-confirm below waits on. */
+    val landingConfirmationNeeded: StateFlow<Boolean> = aircraftConnectionRepository.landingConfirmationNeededFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     /** True while SDKManager reports the product (RC-N3 over USB) connected but the
      *  aircraft's flight controller hasn't come up -- the window where either the link is
      *  still establishing (normal for the first few seconds) or the RC firmware is stuck
@@ -170,7 +183,21 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
             flightState.distinctUntilChangedBy { it::class }.collect { state ->
                 when (state) {
                     is FlightState.ReturnToHome -> flightSafetyActionsController.startGoHome()
-                    is FlightState.EmergencyStop -> flightSafetyActionsController.startAutoLanding()
+                    is FlightState.EmergencyStop -> {
+                        flightSafetyActionsController.startAutoLanding()
+                        // Autonomous landing pauses at a low hover awaiting confirmLanding()
+                        // (see that method's header comment) -- without this the aircraft
+                        // would just sit there while EmergencyStop's own trigger (critical
+                        // battery) keeps draining. Wait for the real signal, but confirm
+                        // anyway after a timeout as a fallback rather than depending on the
+                        // key read succeeding.
+                        launch {
+                            withTimeoutOrNull(EMERGENCY_LANDING_CONFIRM_TIMEOUT_MS) {
+                                landingConfirmationNeeded.first { it }
+                            }
+                            flightSafetyActionsController.confirmLanding()
+                        }
+                    }
                     else -> Unit
                 }
             }
@@ -225,6 +252,22 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         Log.i("WingmanUI", "onTestLandPressed")
         if (manualFlightActiveHolder.value) onManualFlightToggled(false)
         flightSafetyActionsController.startAutoLanding()
+    }
+
+    /** Completes a landing DJI has paused at its low confirmation hover -- see
+     *  FlightSafetyActionsController.confirmLanding()'s header comment. Deliberately a
+     *  separate, explicit operator action for the manual test-Land flow (not auto-sent),
+     *  unlike EmergencyStop's landing which auto-confirms after a timeout (see the
+     *  EmergencyStop branch above) since that one is safety-triggered by critical battery. */
+    fun onConfirmLandingPressed() {
+        Log.i("WingmanUI", "onConfirmLandingPressed")
+        flightSafetyActionsController.confirmLanding()
+    }
+
+    /** Escape hatch out of the landing hover -- see FlightSafetyActionsController.stopAutoLanding. */
+    fun onCancelLandingPressed() {
+        Log.i("WingmanUI", "onCancelLandingPressed")
+        flightSafetyActionsController.stopAutoLanding()
     }
 
     /** Enables/disables the joystick test control on the video test screen. Starting

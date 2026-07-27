@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
                         // gating bug, not a real connection failure. Tap anywhere to go back.
                         Screen.VIDEO_TEST -> Box(modifier = Modifier.fillMaxSize()) {
                             val manualFlightActive by viewModel.manualFlightActive.collectAsStateWithLifecycle()
+                            val landingConfirmationNeeded by viewModel.landingConfirmationNeeded.collectAsStateWithLifecycle()
                             var stickPitchRoll by remember { mutableStateOf(Offset.Zero) }
                             var stickYaw by remember { mutableStateOf(0f) }
                             var stickVertical by remember { mutableStateOf(0f) }
@@ -117,6 +118,27 @@ class MainActivity : ComponentActivity() {
                                     onClick = { viewModel.onTestLandPressed() },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
                                 ) { Text("Land") }
+                            }
+                            // DJI pauses autonomous landing at a low hover awaiting this --
+                            // see FlightSafetyActionsController.confirmLanding()'s header
+                            // comment. Without it Land alone leaves the aircraft hovering
+                            // indefinitely (observed on-device 2026-07-27). Centered and
+                            // large since this is exactly the state that stranded a real
+                            // flight test -- should be impossible to miss when it appears.
+                            if (landingConfirmationNeeded) {
+                                Row(
+                                    modifier = Modifier.align(Alignment.Center),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Button(
+                                        onClick = { viewModel.onConfirmLandingPressed() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                    ) { Text("Confirm Landing") }
+                                    Button(
+                                        onClick = { viewModel.onCancelLandingPressed() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                                    ) { Text("Cancel Landing") }
+                                }
                             }
                             // Manual joystick flight test -- see WingmanViewModel's
                             // manualFlightActiveHolder comment. STOP/Resume mirror the flight

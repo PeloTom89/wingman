@@ -66,6 +66,15 @@ class AircraftConnectionRepository {
         }
     }.distinctUntilChanged()
 
+    /** True while autonomous landing is paused at its low hover awaiting
+     *  FlightSafetyActionsController.confirmLanding() -- see that method's header comment. */
+    val landingConfirmationNeededFlow: Flow<Boolean> = flow {
+        while (true) {
+            emit(getValueAsync(FlightControllerKey.KeyIsLandingConfirmationNeeded) ?: false)
+            delay(POLL_INTERVAL_MS)
+        }
+    }.distinctUntilChanged()
+
     /**
      * Combined aircraft telemetry the flight state machine consumes each tick, POLLED. Each
      * cycle reads every key via getValue; a key that fails/times out this cycle (e.g.
