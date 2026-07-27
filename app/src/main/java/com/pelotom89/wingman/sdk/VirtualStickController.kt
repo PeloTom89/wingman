@@ -196,17 +196,24 @@ class VirtualStickController(
         }
 
         val param = VirtualStickFlightControlParam().apply {
-            // SWAPPED, confirmed via a real flight test (2026-07-23) after the
-            // rollPitchCoordinateSystem fix let commands finally reach the aircraft:
-            // app.pitchMetersPerSecond (forward/back) consistently produced left/right
-            // motion, and app.rollMetersPerSecond (left/right) consistently produced
-            // forward/back motion -- a clean 90-degree swap across all four directions, not
-            // a sign error. DJI's pitch/roll fields don't match this codebase's own
-            // pitch=forward/roll=right convention (see VirtualStickCommand's doc and
-            // FlightCommandCalculator), so compensate for it here, the one place that
-            // constructs the DJI param, rather than at either caller.
-            pitch = command.rollMetersPerSecond
-            roll = command.pitchMetersPerSecond
+            // Roll/pitch axis mapping is MODE-DEPENDENT -- DJI's pitch/roll field semantics
+            // don't line up the same way across VELOCITY and ANGLE control on this aircraft,
+            // so each mapping was pinned empirically from a real flight test. app.pitch>0 =
+            // forward, app.roll>0 = right (see VirtualStickCommand).
+            if (rollPitchAngleMode) {
+                // ANGLE mode, derived on-device 2026-07-27: with the velocity swap below the
+                // stick came out rotated 90deg (up->right, right->back, down->left,
+                // left->forward). Correct mapping, all four verified: forward stick = forward
+                // tilt = DJI pitch NEGATIVE; right stick = right tilt = DJI roll positive.
+                pitch = -command.pitchMetersPerSecond
+                roll = command.rollMetersPerSecond
+            } else {
+                // VELOCITY mode (GPS-following), swap confirmed on-device 2026-07-23 (commit
+                // f7bc185): app.pitch (forward/back) drove left/right and app.roll drove
+                // forward/back -- a clean 90deg swap -- so cross them here.
+                pitch = command.rollMetersPerSecond
+                roll = command.pitchMetersPerSecond
+            }
             yaw = command.yawDegreesPerSecond
             verticalThrottle = command.verticalMetersPerSecond
             // ANGLE for manual (direct tilt, no oscillating velocity loop), VELOCITY for
