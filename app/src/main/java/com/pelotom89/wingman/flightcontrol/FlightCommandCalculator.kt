@@ -23,7 +23,11 @@ class FlightCommandCalculator(
     private val targetDistanceMeters: Double = 10.0,
     private val distanceToleranceMeters: Double = 2.0,
     private val distanceGainMetersPerSecondPerMeter: Double = 0.3,
-    private val maxApproachSpeedMetersPerSecond: Double = 3.0,
+    // Deliberately conservative (1.5 m/s) for the FIRST outdoor autonomous-following test
+    // (2026-07-27) -- walking pace, gives the operator reaction time to STOP if the untested
+    // follow logic misbehaves. Raise toward 3 m/s (and eventually cyclist speeds) only after
+    // the behavior is confirmed correct in real flight, per README's milestone progression.
+    private val maxApproachSpeedMetersPerSecond: Double = 1.5,
 ) {
     /**
      * Yaws to face the subject's phone-GPS position, then approaches or backs off to hold

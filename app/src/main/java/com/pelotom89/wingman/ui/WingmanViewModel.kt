@@ -45,6 +45,10 @@ private const val FC_LINK_STALL_TIMEOUT_MS = 20_000L
  *  confirming anyway as a fallback -- see FlightSafetyActionsController.confirmLanding(). */
 private const val EMERGENCY_LANDING_CONFIRM_TIMEOUT_MS = 30_000L
 
+/** Flight-trace CSV cadence (see FlightLogger). 5Hz is plenty to reconstruct a flight
+ *  after the fact without bloating the file. */
+private const val FLIGHT_LOG_INTERVAL_MS = 200L
+
 /** Cadence/bound for the read-only FC probe while waiting (see
  *  AircraftConnectionRepository.probeFlightControllerLink for what it can and can't do). */
 private const val FC_PROBE_INTERVAL_MS = 5_000L
@@ -149,6 +153,17 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
+        // Persist a 5Hz flight trace to CSV (core/FlightLogger writes to the app's external
+        // files dir, which survives being out of ADB range). Previously FlightLogger was
+        // constructed but log() was never called -- so nothing was recorded. This is the
+        // only post-flight record of what the GPS-following state machine actually did
+        // (state, position, command) for a test we can't monitor live outdoors.
+        viewModelScope.launch {
+            while (true) {
+                flightLogger.log(flightState.value, telemetry.value, commandFlowHolder.value)
+                delay(FLIGHT_LOG_INTERVAL_MS)
+            }
+        }
         viewModelScope.launch {
             combine(
                 flightStateMachine.commandFlow,
