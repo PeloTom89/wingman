@@ -95,10 +95,28 @@ class VirtualStickController(
         // directional movement otherwise. Off the main thread, a UI-thread stall can no
         // longer delay a send past the timeout.
         loopJob = scope.launch(Dispatchers.Default) {
+            // Fixed-SCHEDULE loop, not fixed-DELAY: `delay(100)` after each send only
+            // guarantees a 100ms gap AFTER sendOnce() returns, so if any single send is slow
+            // (JNI/IPC variance, GC, scheduler contention) that time stacks on top instead of
+            // being absorbed -- real-world cadence can drift even though each individual wait
+            // is exactly 100ms. Tracking an absolute nextSendAtMs and sleeping only the
+            // remainder self-corrects instead of accumulating drift. Added after a real
+            // flight test showed continued micro-stuttering while holding a stick steady
+            // even after moving this loop off the main thread (2026-07-23) -- logs when a
+            // send falls behind schedule so the next test can confirm whether this loop's
+            // own cadence is actually the cause.
+            var nextSendAtMs = System.currentTimeMillis()
             while (isActive) {
                 val command = if (overrideActiveFlow.value) VirtualStickCommand.ZERO else commandFlow.value
                 sendOnce(command)
-                delay(COMMAND_INTERVAL_MS)
+                nextSendAtMs += COMMAND_INTERVAL_MS
+                val remainingMs = nextSendAtMs - System.currentTimeMillis()
+                if (remainingMs > 0) {
+                    delay(remainingMs)
+                } else {
+                    Log.w(TAG, "command loop behind schedule by ${-remainingMs}ms")
+                    nextSendAtMs = System.currentTimeMillis()
+                }
             }
         }
     }
