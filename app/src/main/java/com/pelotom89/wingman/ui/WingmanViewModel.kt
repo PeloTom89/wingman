@@ -49,6 +49,11 @@ private const val EMERGENCY_LANDING_CONFIRM_TIMEOUT_MS = 30_000L
  *  after the fact without bloating the file. */
 private const val FLIGHT_LOG_INTERVAL_MS = 200L
 
+/** Exponential-smoothing factor for the gimbal pitch target (0..1; lower = smoother/laggier).
+ *  0.25 at the ~5Hz tick rate ≈ a 0.7s time constant -- smooths GPS-driven jitter without
+ *  visibly trailing the subject. */
+private const val GIMBAL_SMOOTHING_ALPHA = 0.25
+
 /** Cadence/bound for the read-only FC probe while waiting (see
  *  AircraftConnectionRepository.probeFlightControllerLink for what it can and can't do). */
 private const val FC_PROBE_INTERVAL_MS = 5_000L
@@ -184,9 +189,21 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         // the connection handshake appears to disrupt it (aircraft LEDs going to error state
         // while Wingman runs, where competitor apps that send nothing pre-flight connect fine).
         viewModelScope.launch {
-            flightStateMachine.gimbalPitchDegreesFlow.collect { pitchDegrees ->
+            // Low-pass the gimbal target before sending. The raw pitch is derived from GPS
+            // altitude + horizontal distance (computeGimbalPitchDegrees), both noisy at the
+            // 5Hz tick rate, so feeding it straight to rotateTo made the gimbal visibly jumpy
+            // in flight (2026-07-27). Exponential smoothing (alpha ~0.25 -> ~0.7s time
+            // constant) removes the jitter while still tracking the subject; reset to null
+            // when not following so re-entering Following initializes to the current target
+            // instead of sweeping from a stale value.
+            var smoothedPitch: Double? = null
+            flightStateMachine.gimbalPitchDegreesFlow.collect { target ->
                 if (flightStateMachine.flightStateFlow.value is FlightState.Following) {
-                    gimbalController.rotateTo(pitchDegrees, 0.0)
+                    val next = smoothedPitch?.let { it + GIMBAL_SMOOTHING_ALPHA * (target - it) } ?: target
+                    smoothedPitch = next
+                    gimbalController.rotateTo(next, 0.0)
+                } else {
+                    smoothedPitch = null
                 }
             }
         }

@@ -6,12 +6,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -159,40 +163,44 @@ class MainActivity : ComponentActivity() {
                             // aircraft link and leaves the FlightController handlers only
                             // partially registered (serial reads, but zero telemetry/KeyConnection).
                             CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
-                            HudOverlay(flightState = flightState, telemetry = telemetry)
-                            // Flight controls, same as the test screen: take off, then CLIMB
-                            // (with the RC, or manual joysticks on the test screen) to a usable
-                            // following altitude -- the first outdoor follow test (2026-07-27)
-                            // failed only because the aircraft was stuck at ~1.1m, where
-                            // ground-proximity vision-hold prevents horizontal movement. Follow
-                            // itself worked (yawed to face the subject the whole time).
-                            Row(
-                                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Button(
-                                    onClick = { viewModel.onTestTakeoffPressed() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                                ) { Text("Takeoff") }
-                                Button(
-                                    onClick = { viewModel.onTestLandPressed() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                                ) { Text("Land") }
+                            // HUD + all flight controls STACKED at the top (operator feedback
+                            // 2026-07-27: top buttons overlapped the GPS/telemetry header, and
+                            // the separate STOP should just be the Start Following toggle).
+                            // The button row scrolls horizontally so it never overflows.
+                            // Take off, then CLIMB (RC or the manual joysticks below) to a
+                            // usable following altitude before Start Following -- the first
+                            // outdoor follow only failed because the aircraft was stuck at
+                            // ~1.1m where ground-proximity vision-hold blocks horizontal motion.
+                            Column(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                                HudOverlay(flightState = flightState, telemetry = telemetry)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    StartFollowingButton(
+                                        flightState = flightState,
+                                        onStart = { viewModel.onStartFollowingPressed() },
+                                        onStop = { viewModel.onStopPressed() },
+                                    )
+                                    ManualControlBar(
+                                        viewModel = viewModel,
+                                        manualFlightActive = manualFlightActive,
+                                    )
+                                    Button(
+                                        onClick = { viewModel.onTestTakeoffPressed() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                    ) { Text("Takeoff") }
+                                    Button(
+                                        onClick = { viewModel.onTestLandPressed() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                                    ) { Text("Land") }
+                                    Button(onClick = { screen = Screen.PREFLIGHT }) { Text("Back") }
+                                }
                             }
-                            Button(
-                                onClick = { screen = Screen.PREFLIGHT },
-                                modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
-                            ) { Text("Back") }
-                            // Manual joysticks so the operator can take off + CLIMB to a usable
-                            // following altitude and position the aircraft BEFORE Start Following.
-                            // onStartFollowingPressed turns manual off first, so they don't
-                            // fight over the command stream.
-                            ManualControlBar(
-                                viewModel = viewModel,
-                                manualFlightActive = manualFlightActive,
-                                modifier = Modifier.align(Alignment.TopCenter).padding(16.dp),
-                            )
-                            if (manualFlightActive) ManualJoysticks(viewModel)
                             if (landingConfirmationNeeded) {
                                 Row(
                                     modifier = Modifier.align(Alignment.Center),
@@ -208,15 +216,7 @@ class MainActivity : ComponentActivity() {
                                     ) { Text("Cancel Landing") }
                                 }
                             }
-                            StartFollowingButton(
-                                flightState = flightState,
-                                onPressed = { viewModel.onStartFollowingPressed() },
-                                modifier = Modifier.align(Alignment.BottomStart),
-                            )
-                            ManualOverrideButton(
-                                onPressed = { viewModel.onStopPressed() },
-                                modifier = Modifier.align(Alignment.BottomEnd),
-                            )
+                            if (manualFlightActive) ManualJoysticks(viewModel)
                         }
                     }
                 }
