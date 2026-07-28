@@ -19,6 +19,8 @@ import com.pelotom89.wingman.sdk.SdkRegistrationState
 import com.pelotom89.wingman.sdk.VirtualStickCommand
 import com.pelotom89.wingman.sdk.VirtualStickController
 import com.pelotom89.wingman.sdk.WingmanApplication
+import com.pelotom89.wingman.vision.SubjectTrackingRepository
+import dji.sdk.keyvalue.value.common.ComponentIndexType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -80,6 +82,7 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     private val perceptionRepository = PerceptionRepository()
     private val subjectLocationProvider = SubjectLocationProvider(application)
     private val gimbalController = GimbalController()
+    private val subjectTrackingRepository = SubjectTrackingRepository(application)
 
     private val commandFlowHolder = MutableStateFlow(com.pelotom89.wingman.sdk.VirtualStickCommand.ZERO)
     // Single shared instance -- see ManualOverrideGate's header comment for the real bug
@@ -403,6 +406,16 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         virtualStickController.setRollPitchAngleMode(false)
     }
 
+    // --- Phase 1 vision (ground-testable person detection over the camera preview) ---
+    val detections = subjectTrackingRepository.detections
+    val visionInferenceMs = subjectTrackingRepository.lastInferenceMs
+
+    /** Start/stop the detection frame listener with the camera screen's lifecycle. Detection
+     *  is display-only for now (draws boxes) -- it drives nothing until GPS-primed gating and
+     *  the gimbal hookup land. */
+    fun startVisionDetection() = subjectTrackingRepository.start(ComponentIndexType.LEFT_OR_MAIN)
+    fun stopVisionDetection() = subjectTrackingRepository.stop()
+
     /** Operator action (a button in MainActivity's flight screen, replacing the old
      *  tap-to-select-a-subject gesture) — the subject is always "whoever is carrying this
      *  phone," so there's nothing to select, just a decision to start. */
@@ -430,6 +443,7 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     override fun onCleared() {
         super.onCleared()
         virtualStickController.stop()
+        subjectTrackingRepository.close()
         flightLogger.close()
     }
 }

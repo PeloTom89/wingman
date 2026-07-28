@@ -167,6 +167,13 @@ dependencies {
     // --- Location (subject GPS proxy, see location/SubjectLocationProvider.kt) ---
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
+    // --- On-device vision (Phase 1: GPS-primed subject detection for gimbal framing) ---
+    // MediaPipe Tasks Vision: on-device object detector (EfficientDet-Lite0 in assets),
+    // GPU-delegated. Brings its own native libs -- SMOKE-TEST that the app still launches
+    // under the SecNeo protection layer before building on it (SecNeo protects the DEX, not
+    // sibling native libs, so this should coexist, but DJI's runtime has surprised us before).
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+
     // --- Testing ---
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")

@@ -21,6 +21,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
@@ -91,8 +92,24 @@ class MainActivity : ComponentActivity() {
                         // just an unreliable signal -- meaning the "not connected" state is a
                         // gating bug, not a real connection failure. Tap anywhere to go back.
                         Screen.VIDEO_TEST -> Box(modifier = Modifier.fillMaxSize()) {
+                            // Phase 1 vision: run person detection over the live feed and draw
+                            // the boxes -- ground-testable (point the drone camera at a person).
+                            // Started/stopped with this screen's lifecycle; drives nothing yet.
+                            val detections by viewModel.detections.collectAsStateWithLifecycle()
+                            val visionMs by viewModel.visionInferenceMs.collectAsStateWithLifecycle()
+                            DisposableEffect(Unit) {
+                                viewModel.startVisionDetection()
+                                onDispose { viewModel.stopVisionDetection() }
+                            }
+
                             CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
+                            DetectionOverlay(detections = detections)
                             HudOverlay(flightState = flightState, telemetry = telemetry)
+                            Text(
+                                text = "Vision: ${detections.size} person(s)  ${visionMs}ms",
+                                color = Color(0xFF00E676),
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
+                            )
                             Button(
                                 onClick = { screen = Screen.PREFLIGHT },
                                 modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
