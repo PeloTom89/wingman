@@ -59,6 +59,10 @@ private const val GIMBAL_SMOOTHING_ALPHA = 0.3          // low-pass on the (nois
 private const val GIMBAL_PITCH_KP = 3.0                 // deg/s of gimbal speed per deg of error
 private const val GIMBAL_MAX_PITCH_SPEED_DEG_S = 25.0   // cap slew rate -- smooth, not frantic
 private const val GIMBAL_PITCH_DEADBAND_DEG = 1.0       // within this, hold (let it stabilize)
+/** Camera vertical FOV (deg), converts a subject's vertical pixel offset to a gimbal-pitch
+ *  correction for vision framing. Approximate for the Mini 4 Pro (~50 deg); it's a response
+ *  gain, so exactness isn't critical -- tune by feel. */
+private const val GIMBAL_VERTICAL_FOV_DEG = 50.0
 
 /** Cadence/bound for the read-only FC probe while waiting (see
  *  AircraftConnectionRepository.probeFlightControllerLink for what it can and can't do). */
@@ -203,30 +207,48 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         // deadband so it holds (and the gimbal stabilizes) once framed. Gated on Following so
         // no gimbal command ever fires pre-connection (same rule as VirtualStick/camera).
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
-            var smoothedTarget: Double? = null
+            var smoothedGpsTarget: Double? = null
             var commanding = false
             while (isActive) {
-                if (flightStateMachine.flightStateFlow.value is FlightState.Following) {
-                    val raw = flightStateMachine.gimbalPitchDegreesFlow.value
-                    val target = smoothedTarget?.let { it + GIMBAL_SMOOTHING_ALPHA * (raw - it) } ?: raw
-                    smoothedTarget = target
-                    val current = gimbalController.currentPitchDegrees()
-                    if (current != null) {
-                        val error = target - current
-                        val speed = if (kotlin.math.abs(error) < GIMBAL_PITCH_DEADBAND_DEG) {
-                            0.0
-                        } else {
-                            (GIMBAL_PITCH_KP * error).coerceIn(-GIMBAL_MAX_PITCH_SPEED_DEG_S, GIMBAL_MAX_PITCH_SPEED_DEG_S)
+                val following = flightStateMachine.flightStateFlow.value is FlightState.Following
+                // Frame during following (real use) OR when vision-framing is toggled on for a
+                // ground test. Both are post-connection operator actions, so no gimbal command
+                // ever fires pre-connection (same safety rule as VirtualStick/camera).
+                val framing = following || visionFramingEnabledHolder.value
+                val current = if (framing) gimbalController.currentPitchDegrees() else null
+                if (current != null) {
+                    val subject = subjectTrackingRepository.selectedSubject.value
+                    // VISION target when we can see the subject: point the gimbal so their box
+                    // moves to vertical frame-center. Vertical pixel offset -> degrees via the
+                    // camera's vertical FOV. This is the GPS-primed refinement -- pixel-precise
+                    // framing that corrects GPS's metre-level error.
+                    // GPS fallback (only while actually following) when vision has no subject.
+                    val target: Double = when {
+                        subject != null -> {
+                            smoothedGpsTarget = null // re-init GPS smoothing on next fallback
+                            current + (0.5 - subject.centerY) * GIMBAL_VERTICAL_FOV_DEG
                         }
-                        gimbalController.setPitchSpeed(speed)
-                        commanding = true
+                        following -> {
+                            val raw = flightStateMachine.gimbalPitchDegreesFlow.value
+                            (smoothedGpsTarget?.let { it + GIMBAL_SMOOTHING_ALPHA * (raw - it) } ?: raw)
+                                .also { smoothedGpsTarget = it }
+                        }
+                        else -> current // vision framing toggled on but nobody detected: hold
                     }
+                    val error = target - current
+                    val speed = if (kotlin.math.abs(error) < GIMBAL_PITCH_DEADBAND_DEG) {
+                        0.0
+                    } else {
+                        (GIMBAL_PITCH_KP * error).coerceIn(-GIMBAL_MAX_PITCH_SPEED_DEG_S, GIMBAL_MAX_PITCH_SPEED_DEG_S)
+                    }
+                    gimbalController.setPitchSpeed(speed)
+                    commanding = true
                 } else {
                     if (commanding) {
-                        gimbalController.setPitchSpeed(0.0) // stop slewing when following ends
+                        gimbalController.setPitchSpeed(0.0) // stop slewing when framing ends
                         commanding = false
                     }
-                    smoothedTarget = null
+                    smoothedGpsTarget = null
                 }
                 delay(GIMBAL_LOOP_INTERVAL_MS)
             }
@@ -406,15 +428,28 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
         virtualStickController.setRollPitchAngleMode(false)
     }
 
-    // --- Phase 1 vision (ground-testable person detection over the camera preview) ---
+    // --- Phase 1 vision (person detection over the camera preview + gimbal framing) ---
     val detections = subjectTrackingRepository.detections
+    val selectedSubject = subjectTrackingRepository.selectedSubject
     val visionInferenceMs = subjectTrackingRepository.lastInferenceMs
 
-    /** Start/stop the detection frame listener with the camera screen's lifecycle. Detection
-     *  is display-only for now (draws boxes) -- it drives nothing until GPS-primed gating and
-     *  the gimbal hookup land. */
+    /** True while vision framing is driving the gimbal for a ground test (see the gimbal loop
+     *  in init). During real following the gimbal frames automatically -- this toggle is only
+     *  for exercising it on the ground without flying. */
+    private val visionFramingEnabledHolder = MutableStateFlow(false)
+    val visionFramingActive: StateFlow<Boolean> get() = visionFramingEnabledHolder.asStateFlow()
+
+    /** Start/stop the detection frame listener with the camera screen's lifecycle. */
     fun startVisionDetection() = subjectTrackingRepository.start(ComponentIndexType.LEFT_OR_MAIN)
-    fun stopVisionDetection() = subjectTrackingRepository.stop()
+    fun stopVisionDetection() {
+        subjectTrackingRepository.stop()
+        visionFramingEnabledHolder.value = false
+    }
+
+    fun onVisionFramingToggled(enabled: Boolean) {
+        Log.i("WingmanUI", "onVisionFramingToggled($enabled)")
+        visionFramingEnabledHolder.value = enabled
+    }
 
     /** Operator action (a button in MainActivity's flight screen, replacing the old
      *  tap-to-select-a-subject gesture) — the subject is always "whoever is carrying this

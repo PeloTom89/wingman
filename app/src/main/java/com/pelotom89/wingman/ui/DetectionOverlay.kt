@@ -17,18 +17,24 @@ import com.pelotom89.wingman.vision.DetectedSubject
  * good enough for a diagnostic (exact letterbox mapping matters only once it drives framing).
  */
 @Composable
-fun DetectionOverlay(detections: List<DetectedSubject>, modifier: Modifier = Modifier) {
+fun DetectionOverlay(
+    detections: List<DetectedSubject>,
+    selected: DetectedSubject?,
+    modifier: Modifier = Modifier,
+) {
     Canvas(modifier = modifier.fillMaxSize()) {
         detections.forEach { d ->
+            val isSubject = d == selected
             val left = d.left * size.width
             val top = d.top * size.height
             val w = (d.right - d.left) * size.width
             val h = (d.bottom - d.top) * size.height
+            // Subject drawn bold yellow; other people thin green.
             drawRect(
-                color = Color(0xFF00E676),
+                color = if (isSubject) Color(0xFFFFEB3B) else Color(0xFF00E676),
                 topLeft = Offset(left, top),
                 size = Size(w, h),
-                style = Stroke(width = 4f),
+                style = Stroke(width = if (isSubject) 7f else 3f),
             )
         }
     }

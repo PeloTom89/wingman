@@ -96,20 +96,32 @@ class MainActivity : ComponentActivity() {
                             // the boxes -- ground-testable (point the drone camera at a person).
                             // Started/stopped with this screen's lifecycle; drives nothing yet.
                             val detections by viewModel.detections.collectAsStateWithLifecycle()
+                            val selectedSubject by viewModel.selectedSubject.collectAsStateWithLifecycle()
                             val visionMs by viewModel.visionInferenceMs.collectAsStateWithLifecycle()
+                            val visionFramingActive by viewModel.visionFramingActive.collectAsStateWithLifecycle()
                             DisposableEffect(Unit) {
                                 viewModel.startVisionDetection()
                                 onDispose { viewModel.stopVisionDetection() }
                             }
 
                             CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
-                            DetectionOverlay(detections = detections)
+                            DetectionOverlay(detections = detections, selected = selectedSubject)
                             HudOverlay(flightState = flightState, telemetry = telemetry)
                             Text(
                                 text = "Vision: ${detections.size} person(s)  ${visionMs}ms",
                                 color = Color(0xFF00E676),
                                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
                             )
+                            // Vision framing toggle: drives the gimbal to keep the highlighted
+                            // subject vertically centered -- ground-testable (hold the drone,
+                            // point at a person, toggle on, the gimbal tracks them).
+                            Button(
+                                onClick = { viewModel.onVisionFramingToggled(!visionFramingActive) },
+                                modifier = Modifier.align(Alignment.TopEnd).padding(top = 72.dp, end = 16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (visionFramingActive) Color(0xFF2E7D32) else Color.DarkGray,
+                                ),
+                            ) { Text(if (visionFramingActive) "Vision framing: ON" else "Vision framing") }
                             Button(
                                 onClick = { screen = Screen.PREFLIGHT },
                                 modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),

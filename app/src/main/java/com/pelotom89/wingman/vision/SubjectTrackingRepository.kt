@@ -44,6 +44,15 @@ class SubjectTrackingRepository(private val context: Context) {
     private val _detections = MutableStateFlow<List<DetectedSubject>>(emptyList())
     val detections: StateFlow<List<DetectedSubject>> = _detections.asStateFlow()
 
+    /** The one box we treat as THE subject to frame on. For now the largest person (nearest /
+     *  main subject) -- GPS gating (getLiveViewLocationWithGPS, pick the box nearest the
+     *  subject's projected position) is the planned refinement for the multi-person case, and
+     *  slots in right here. Null when nobody is detected. */
+    private val _selectedSubject = MutableStateFlow<DetectedSubject?>(null)
+    val selectedSubject: StateFlow<DetectedSubject?> = _selectedSubject.asStateFlow()
+
+    private fun DetectedSubject.area() = (right - left) * (bottom - top)
+
     /** Rolling last inference time (ms), for the on-screen perf readout. */
     private val _lastInferenceMs = MutableStateFlow(0L)
     val lastInferenceMs: StateFlow<Long> = _lastInferenceMs.asStateFlow()
@@ -69,6 +78,7 @@ class SubjectTrackingRepository(private val context: Context) {
                 val boxes = detector?.detect(bitmap) ?: emptyList()
                 _lastInferenceMs.value = SystemClock.uptimeMillis() - start
                 _detections.value = boxes
+                _selectedSubject.value = boxes.maxByOrNull { it.area() }
             } catch (t: Throwable) {
                 Log.w(TAG, "detection failed", t)
             } finally {
@@ -97,6 +107,7 @@ class SubjectTrackingRepository(private val context: Context) {
     fun stop() {
         MediaDataCenter.getInstance().cameraStreamManager.removeFrameListener(frameListener)
         _detections.value = emptyList()
+        _selectedSubject.value = null
     }
 
     fun close() {
