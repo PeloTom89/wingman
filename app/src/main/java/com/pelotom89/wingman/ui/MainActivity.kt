@@ -191,7 +191,18 @@ class MainActivity : ComponentActivity() {
                             // during the handshake window competes with / disrupts the RC<->
                             // aircraft link and leaves the FlightController handlers only
                             // partially registered (serial reads, but zero telemetry/KeyConnection).
+                            // Run person detection while on the flight screen so vision framing
+                            // (gimbal pitch + aircraft yaw) is live during following. Started/
+                            // stopped with the screen; drives the gimbal/yaw only while Following.
+                            val flightDetections by viewModel.detections.collectAsStateWithLifecycle()
+                            val flightSelected by viewModel.selectedSubject.collectAsStateWithLifecycle()
+                            DisposableEffect(Unit) {
+                                viewModel.startVisionDetection()
+                                onDispose { viewModel.stopVisionDetection() }
+                            }
+
                             CameraPreviewScreen(cameraIndex = ComponentIndexType.LEFT_OR_MAIN)
+                            DetectionOverlay(detections = flightDetections, selected = flightSelected)
                             // HUD + all flight controls STACKED at the top (operator feedback
                             // 2026-07-27: top buttons overlapped the GPS/telemetry header, and
                             // the separate STOP should just be the Start Following toggle).

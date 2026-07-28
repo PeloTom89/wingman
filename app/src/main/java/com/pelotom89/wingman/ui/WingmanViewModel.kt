@@ -64,6 +64,14 @@ private const val GIMBAL_PITCH_DEADBAND_DEG = 1.0       // within this, hold (le
  *  gain, so exactness isn't critical -- tune by feel. */
 private const val GIMBAL_VERTICAL_FOV_DEG = 50.0
 
+/** Horizontal vision framing (aircraft yaw). FOV wider than vertical (~70 deg). Kept gentle
+ *  and low-capped for the first flight test of vision-into-flight-control -- yaw only, so
+ *  worst case is a little unwanted rotation, never translation. All tunable by feel. */
+private const val VISION_HORIZONTAL_FOV_DEG = 70.0
+private const val VISION_YAW_KP = 1.2               // deg/s of aircraft yaw per deg of frame error
+private const val VISION_YAW_MAX_DEG_S = 20.0       // gentle cap
+private const val VISION_YAW_DEADBAND_DEG = 2.0     // hold when roughly centered
+
 /** Cadence/bound for the read-only FC probe while waiting (see
  *  AircraftConnectionRepository.probeFlightControllerLink for what it can and can't do). */
 private const val FC_PROBE_INTERVAL_MS = 5_000L
@@ -97,6 +105,10 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     private val flightLogger = FlightLogger(application)
     private val flightSafetyActionsController = FlightSafetyActionsController()
     private val safetyLimits = SafetyLimits()
+
+    // Declared BEFORE init: the gimbal loop launched in init reads this on Dispatchers.Default
+    // and would NPE on a later-declared property (Kotlin initializes in declaration order).
+    private val visionFramingEnabledHolder = MutableStateFlow(false)
 
     // Manual joystick test control (video test screen) -- deliberately bypasses
     // FlightStateMachine entirely, same spirit as onTestTakeoffPressed/onTestLandPressed:
@@ -185,8 +197,22 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
                 flightStateMachine.commandFlow,
                 manualStickCommandHolder,
                 manualFlightActiveHolder,
-            ) { fsmCommand, manualCommand, manualActive ->
-                if (manualActive) manualCommand else fsmCommand
+                subjectTrackingRepository.selectedSubject,
+            ) { fsmCommand, manualCommand, manualActive, subject ->
+                when {
+                    manualActive -> manualCommand
+                    // HORIZONTAL vision framing: while following with the subject in view,
+                    // refine the aircraft YAW to center them left/right in-frame (the gimbal
+                    // can't pan enough, so the aircraft rotates). Only the yaw component is
+                    // replaced -- pitch/roll (GPS distance-hold) are untouched -- and only
+                    // while Following, so safety escalations (RTH/EmergencyStop -> ZERO fsm)
+                    // are never overridden. GPS bearing yaw (fsm) is the fallback when no
+                    // subject is detected. Gentle + clamped so a bad detection only rotates
+                    // the aircraft a little, never translates it.
+                    subject != null && flightStateMachine.flightStateFlow.value is FlightState.Following ->
+                        fsmCommand.copy(yawDegreesPerSecond = visionFramingYaw(subject))
+                    else -> fsmCommand
+                }
             }.collect { commandFlowHolder.value = it }
         }
         // Gimbal aiming is independent of the VirtualStick command path entirely -- see
@@ -434,9 +460,8 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     val visionInferenceMs = subjectTrackingRepository.lastInferenceMs
 
     /** True while vision framing is driving the gimbal for a ground test (see the gimbal loop
-     *  in init). During real following the gimbal frames automatically -- this toggle is only
-     *  for exercising it on the ground without flying. */
-    private val visionFramingEnabledHolder = MutableStateFlow(false)
+     *  in init; the holder is declared up top so init can read it). During real following the
+     *  gimbal frames automatically -- this toggle is only for exercising it on the ground. */
     val visionFramingActive: StateFlow<Boolean> get() = visionFramingEnabledHolder.asStateFlow()
 
     /** Start/stop the detection frame listener with the camera screen's lifecycle. */
@@ -449,6 +474,16 @@ class WingmanViewModel(application: Application) : AndroidViewModel(application)
     fun onVisionFramingToggled(enabled: Boolean) {
         Log.i("WingmanUI", "onVisionFramingToggled($enabled)")
         visionFramingEnabledHolder.value = enabled
+    }
+
+    /** Aircraft yaw rate (deg/s) to center [subject] horizontally in-frame. Horizontal pixel
+     *  offset -> degrees via the camera's horizontal FOV; +x (right of center) yaws clockwise
+     *  (right) to bring them back, matching the GPS follow-yaw sign convention. Deadband so it
+     *  holds when roughly centered, clamped gentle so a bad detection can't swing the aircraft. */
+    private fun visionFramingYaw(subject: com.pelotom89.wingman.vision.DetectedSubject): Double {
+        val errorDeg = (subject.centerX - 0.5) * VISION_HORIZONTAL_FOV_DEG
+        if (kotlin.math.abs(errorDeg) < VISION_YAW_DEADBAND_DEG) return 0.0
+        return (errorDeg * VISION_YAW_KP).coerceIn(-VISION_YAW_MAX_DEG_S, VISION_YAW_MAX_DEG_S)
     }
 
     /** Operator action (a button in MainActivity's flight screen, replacing the old
